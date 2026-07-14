@@ -1,0 +1,501 @@
+
+local cloneref = (cloneref or clonereference or function(instance) return instance end)
+local HttpService = cloneref(game:GetService("HttpService"))
+local Players = cloneref(game:GetService("Players"))
+local isfolder, isfile, listfiles = isfolder, isfile, listfiles
+
+local SaveManager = {} do
+    SaveManager.Folder = "Seisen Hub"
+    SaveManager.SubFolder = ""
+    SaveManager.Ignore = {}
+    SaveManager.Library = nil
+    SaveManager.Parser = {
+        Toggle = {
+            Save = function(idx, object)
+                local keybindName = nil
+                if object.Keybind and object.Keybind ~= Enum.KeyCode.Unknown then
+                    keybindName = object.Keybind.Name
+                end
+                return { type = "Toggle", idx = idx, value = object.Value, keybind = keybindName }
+            end,
+            Load = function(idx, data)
+                local object = SaveManager.Library.Toggles[idx]
+                if object then
+                    object:SetValue(data.value)
+                    if data.keybind and object.SetKeybind then
+                        local key = Enum.KeyCode[data.keybind]
+                        if key then object:SetKeybind(key) end
+                    end
+                end
+            end,
+        },
+        Keybind = {
+            Save = function(idx, object)
+                local keyName = (object.Value and object.Value ~= Enum.KeyCode.Unknown) and object.Value.Name or "Unknown"
+                return { type = "Keybind", idx = idx, value = keyName }
+            end,
+            Load = function(idx, data)
+                local object = SaveManager.Library.Options[idx]
+                if object and data.value then
+                    local key = Enum.KeyCode[data.value]
+                    if key then object:SetValue(key) end
+                end
+            end,
+        },
+        Slider = {
+            Save = function(idx, object)
+                return { type = "Slider", idx = idx, value = tostring(object.Value) }
+            end,
+            Load = function(idx, data)
+                local object = SaveManager.Library.Options[idx]
+                if object then
+                    object:SetValue(tonumber(data.value))
+                end
+            end,
+        },
+        Dropdown = {
+            Save = function(idx, object)
+                return { type = "Dropdown", idx = idx, value = object.Value, multi = object.Multi }
+            end,
+            Load = function(idx, data)
+                local object = SaveManager.Library.Options[idx]
+                if object then
+                    object:SetValue(data.value)
+                end
+            end,
+        },
+        ColorPicker = {
+            Save = function(idx, object)
+                return { type = "ColorPicker", idx = idx, value = object.Value:ToHex() }
+            end,
+            Load = function(idx, data)
+                if SaveManager.Library.Options[idx] then
+                    SaveManager.Library.Options[idx]:SetValue(Color3.fromHex(data.value))
+                end
+            end,
+        },
+        Input = {
+            Save = function(idx, object)
+                return { type = "Input", idx = idx, text = object.Value }
+            end,
+            Load = function(idx, data)
+                local object = SaveManager.Library.Options[idx]
+                if object and type(data.text) == "string" then
+                    object:SetValue(data.text)
+                end
+            end,
+        },
+    }
+
+    function SaveManager:SetLibrary(library)
+        self.Library = library
+    end
+
+    function SaveManager:IgnoreThemeSettings()
+        self:SetIgnoreIndexes({
+            "BackgroundColor", "MainColor", "AccentColor", "OutlineColor", "FontColor", "FontFace",
+            "ThemeManager_ThemeList", "ThemeManager_CustomThemeList", "ThemeManager_CustomThemeName",
+        })
+    end
+
+    function SaveManager:SetIgnoreIndexes(list)
+        for _, key in pairs(list) do
+            self.Ignore[key] = true
+        end
+    end
+
+    function SaveManager:SetFolder(folder)
+        self.Folder = folder
+        self:BuildFolderTree()
+    end
+
+    function SaveManager:SetSubFolder(folder)
+        self.SubFolder = folder
+        self:BuildFolderTree()
+    end
+
+    function SaveManager:CheckSubFolder(createFolder)
+        if typeof(self.SubFolder) ~= "string" or self.SubFolder == "" then return false end
+        if createFolder == true then
+            if not isfolder(self.Folder .. "/Saved/" .. self.SubFolder) then
+                makefolder(self.Folder .. "/Saved/" .. self.SubFolder)
+            end
+        end
+        return true
+    end
+
+    function SaveManager:BuildFolderTree()
+        local paths = {self.Folder, self.Folder .. "/Themes", self.Folder .. "/Saved"}
+        if self:CheckSubFolder(false) then
+            table.insert(paths, self.Folder .. "/Saved/" .. self.SubFolder)
+        end
+        for _, path in ipairs(paths) do
+            if not isfolder(path) then
+                pcall(makefolder, path)
+            end
+        end
+    end
+
+    function SaveManager:Save(name)
+        if not name then return false, "no config file is selected" end
+        self:BuildFolderTree()
+
+        local fullPath = self.Folder .. "/Saved/" .. name .. ".json"
+        if self:CheckSubFolder(true) then
+            fullPath = self.Folder .. "/Saved/" .. self.SubFolder .. "/" .. name .. ".json"
+        end
+
+        local data = { 
+            objects = {},
+            exclusive = self.Library.Toggles.SaveManager_AccountExclusive and self.Library.Toggles.SaveManager_AccountExclusive.Value or false,
+            userId = Players.LocalPlayer.UserId
+        }
+
+        for idx, toggle in pairs(self.Library.Toggles) do
+            if self.Ignore[idx] then continue end
+            table.insert(data.objects, self.Parser.Toggle.Save(idx, toggle))
+        end
+
+        for idx, option in pairs(self.Library.Options) do
+            if not option.Type then continue end
+            if not self.Parser[option.Type] then continue end
+            if self.Ignore[idx] then continue end
+            table.insert(data.objects, self.Parser[option.Type].Save(idx, option))
+        end
+
+        local success, encoded = pcall(HttpService.JSONEncode, HttpService, data)
+        if not success then return false, "failed to encode data" end
+
+        writefile(fullPath, encoded)
+
+        if self.Library.Toggles.SaveManager_ApplyAutoload and self.Library.Toggles.SaveManager_ApplyAutoload.Value then
+            self:SaveAutoloadConfig(name, true)
+        end
+
+        return true
+    end
+
+    function SaveManager:Load(name)
+        if not name then return false, "no config file is selected" end
+        self:BuildFolderTree()
+
+        local file = self.Folder .. "/Saved/" .. name .. ".json"
+        if self:CheckSubFolder(true) then
+            file = self.Folder .. "/Saved/" .. self.SubFolder .. "/" .. name .. ".json"
+        end
+
+        if not isfile(file) then return false, "invalid file" end
+
+        local success, decoded = pcall(HttpService.JSONDecode, HttpService, readfile(file))
+        if not success then return false, "decode error" end
+
+        if decoded.exclusive and decoded.userId ~= Players.LocalPlayer.UserId then
+            return false, "This config is exclusive to another account"
+        end
+
+        for _, option in pairs(decoded.objects) do
+            if not option.type then continue end
+            if not self.Parser[option.type] then continue end
+            if self.Ignore[option.idx] then continue end
+            task.spawn(self.Parser[option.type].Load, option.idx, option)
+        end
+
+        return true
+    end
+
+    function SaveManager:Delete(name)
+        if not name then return false, "no config file is selected" end
+        local file = self.Folder .. "/Saved/" .. name .. ".json"
+        if self:CheckSubFolder(true) then
+            file = self.Folder .. "/Saved/" .. self.SubFolder .. "/" .. name .. ".json"
+        end
+        if not isfile(file) then return false, "invalid file" end
+        local success = pcall(delfile, file)
+        if not success then return false, "delete file error" end
+        return true
+    end
+
+    function SaveManager:RefreshConfigList()
+        self:BuildFolderTree()
+        local list = {}
+        local folder = self.Folder .. "/Saved"
+        if self:CheckSubFolder(true) then
+            folder = self.Folder .. "/Saved/" .. self.SubFolder
+        end
+        
+        local success, files = pcall(listfiles, folder)
+        if not success then return {} end
+        
+        for _, file in ipairs(files) do
+            if file:sub(-5) == ".json" then
+                local name = file:match("([^/\\]+)%.json$")
+                if name then table.insert(list, name) end
+            end
+        end
+        return list
+    end
+
+    function SaveManager:GetAutoloadConfig()
+        self:BuildFolderTree()
+        
+        local accountPath = self.Folder .. "/Saved/autoload_" .. Players.LocalPlayer.UserId .. ".txt"
+        local normalPath = self.Folder .. "/Saved/autoload.txt"
+        
+        if self:CheckSubFolder(true) then
+            accountPath = self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload_" .. Players.LocalPlayer.UserId .. ".txt"
+            normalPath = self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload.txt"
+        end
+
+        if isfile(accountPath) then
+            local success, name = pcall(readfile, accountPath)
+            if success and name ~= "" then return name, "Account" end
+        end
+
+        if isfile(normalPath) then
+            local success, name = pcall(readfile, normalPath)
+            if success and name ~= "" then return name, "Normal" end
+        end
+
+        return "none", "None"
+    end
+
+    function SaveManager:GetAutoloadPaths()
+        local accountPath = self.Folder .. "/Saved/autoload_" .. Players.LocalPlayer.UserId .. ".txt"
+        local normalPath = self.Folder .. "/Saved/autoload.txt"
+        
+        if self:CheckSubFolder(true) then
+            accountPath = self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload_" .. Players.LocalPlayer.UserId .. ".txt"
+            normalPath = self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload.txt"
+        end
+        return accountPath, normalPath
+    end
+
+    function SaveManager:SaveAutoloadConfig(name, isAccount)
+        self:BuildFolderTree()
+        local path = isAccount and (self.Folder .. "/Saved/autoload_" .. Players.LocalPlayer.UserId .. ".txt") or (self.Folder .. "/Saved/autoload.txt")
+        if self:CheckSubFolder(true) then
+            path = isAccount and (self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload_" .. Players.LocalPlayer.UserId .. ".txt") or (self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload.txt")
+        end
+        local success = pcall(writefile, path, name)
+        if not success then return false, "write file error" end
+        return true, ""
+    end
+
+    function SaveManager:DeleteAutoLoadConfig(isAccount)
+        self:BuildFolderTree()
+        local path = isAccount and (self.Folder .. "/Saved/autoload_" .. Players.LocalPlayer.UserId .. ".txt") or (self.Folder .. "/Saved/autoload.txt")
+        if self:CheckSubFolder(true) then
+            path = isAccount and (self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload_" .. Players.LocalPlayer.UserId .. ".txt") or (self.Folder .. "/Saved/" .. self.SubFolder .. "/autoload.txt")
+        end
+        if not isfile(path) then return true end
+        local success = pcall(delfile, path)
+        if not success then return false, "delete file error" end
+        return true, ""
+    end
+
+    function SaveManager:LoadAutoloadConfig()
+        local accountPath, normalPath = self:GetAutoloadPaths()
+
+        -- Priority 1: Account Autoload
+        if isfile(accountPath) then
+            local success, name = pcall(readfile, accountPath)
+            if success and name ~= "" then
+                local loadSuccess, err = self:Load(name)
+                if loadSuccess then
+                    print("[SaveManager] Auto loaded Account config:", name)
+                    return
+                end
+                print("[SaveManager] Account autoload failed, falling back to Normal:", err)
+            end
+        end
+
+        -- Priority 2: Normal Autoload
+        if isfile(normalPath) then
+            local success, name = pcall(readfile, normalPath)
+            if success and name ~= "" then
+                local loadSuccess, err = self:Load(name)
+                if loadSuccess then
+                    print("[SaveManager] Auto loaded Normal config:", name)
+                end
+            end
+        end
+    end
+
+    function SaveManager:BuildConfigSection(tab)
+        assert(self.Library, "Must set SaveManager.Library")
+
+        local section = tab:CreateSection({ Name = "Configuration", Side = "Right" })
+
+        local function Notify(title, text, duration)
+            if self.Library and self.Library.Notify then
+                self.Library:Notify({
+                    Title = title,
+                    Content = text,
+                    Duration = duration or 5
+                })
+            end
+        end
+
+        section:AddTextbox({
+            Name = "Config Name",
+            Flag = "SaveManager_ConfigName",
+            Placeholder = "Enter config name...",
+            Callback = function() end
+        })
+
+        section:AddToggle({
+            Name = "Account Exclusive",
+            Flag = "SaveManager_AccountExclusive",
+            Default = false,
+        })
+
+        section:AddToggle({
+            Name = "Account Autoload",
+            Flag = "SaveManager_ApplyAutoload",
+            Default = false,
+        })
+
+        local function UpdateList()
+            local list = self:RefreshConfigList()
+            local dropdown = self.Library.Options.SaveManager_ConfigList
+            if dropdown then
+                dropdown:Refresh(list, true)
+            end
+        end
+
+        section:AddButton({
+            Name = "Create Config",
+            Callback = function()
+                local name = self.Library.Options.SaveManager_ConfigName and self.Library.Options.SaveManager_ConfigName.Value or ""
+                if name:gsub(" ", "") == "" then
+                    Notify("Seisen Hub", "Invalid config name (empty)", 3)
+                    return
+                end
+                local success, err = self:Save(name)
+                if not success then
+                    Notify("Seisen Hub", "Failed to create config: " .. tostring(err), 5)
+                    return
+                end
+                Notify("Seisen Hub", "Created config: " .. name, 5)
+                UpdateList()
+            end
+        })
+
+        section:AddDivider()
+
+        section:AddDropdown({
+            Name = "Config List",
+            Options = self:RefreshConfigList(),
+            Flag = "SaveManager_ConfigList",
+            Callback = function() end
+        })
+
+        section:AddButton({
+            Name = "Load Config",
+            Callback = function()
+                local name = self.Library.Options.SaveManager_ConfigList and self.Library.Options.SaveManager_ConfigList.Value
+                local success, err = self:Load(name)
+                if not success then
+                    Notify("Seisen Hub", "Failed to load config: " .. tostring(err), 5)
+                    return
+                end
+                Notify("Seisen Hub", "Loaded config: " .. name, 5)
+            end
+        })
+
+        section:AddButton({
+            Name = "Overwrite Config",
+            Callback = function()
+                local name = self.Library.Options.SaveManager_ConfigList and self.Library.Options.SaveManager_ConfigList.Value
+                local success, err = self:Save(name)
+                if not success then
+                    Notify("Seisen Hub", "Failed to overwrite config: " .. tostring(err), 5)
+                    return
+                end
+                Notify("Seisen Hub", "Overwrote config: " .. name, 5)
+            end
+        })
+
+        section:AddButton({
+            Name = "Delete Config",
+            Callback = function()
+                local name = self.Library.Options.SaveManager_ConfigList and self.Library.Options.SaveManager_ConfigList.Value
+                local success, err = self:Delete(name)
+                if not success then
+                    print("[SaveManager] Failed to delete config:", err)
+                    return
+                end
+                print("[SaveManager] Deleted config:", name)
+                UpdateList()
+            end
+        })
+
+        section:AddButton({
+            Name = "Refresh List",
+            Callback = UpdateList
+        })
+
+        section:AddDivider()
+
+        local config, configType = self:GetAutoloadConfig()
+        local autoloadLabel = section:AddLabel({ Text = "Autoload: " .. config .. " (" .. configType .. ")" })
+
+        local function UpdateAutoloadLabel()
+            local cfg, cfgType = self:GetAutoloadConfig()
+            if autoloadLabel and autoloadLabel.SetText then
+                autoloadLabel:SetText("Autoload: " .. cfg .. " (" .. cfgType .. ")")
+            end
+        end
+
+        section:AddButton({
+            Name = "Set as Normal Autoload",
+            Callback = function()
+                local name = self.Library.Options.SaveManager_ConfigList and self.Library.Options.SaveManager_ConfigList.Value
+                local success, err = self:SaveAutoloadConfig(name, false)
+                if not success then
+                    Notify("Seisen Hub", "Failed to set normal autoload: " .. tostring(err), 5)
+                    return
+                end
+                Notify("Seisen Hub", "Set normal autoload to: " .. name, 5)
+                UpdateList()
+                UpdateAutoloadLabel()
+            end
+        })
+
+        section:AddButton({
+            Name = "Set as Account Autoload",
+            Callback = function()
+                local name = self.Library.Options.SaveManager_ConfigList and self.Library.Options.SaveManager_ConfigList.Value
+                local success, err = self:SaveAutoloadConfig(name, true)
+                if not success then
+                    Notify("Seisen Hub", "Failed to set account autoload: " .. tostring(err), 5)
+                    return
+                end
+                Notify("Seisen Hub", "Set account autoload to: " .. name, 5)
+                UpdateList()
+                UpdateAutoloadLabel()
+            end
+        })
+
+        section:AddButton({
+            Name = "Reset Autoloads",
+            Callback = function()
+                local s1, e1 = self:DeleteAutoLoadConfig(true)
+                local s2, e2 = self:DeleteAutoLoadConfig(false)
+                if not s1 or not s2 then
+                    Notify("Seisen Hub", "Failed to reset autoloads", 5)
+                    return
+                end
+                Notify("Seisen Hub", "Reset all autoloads", 5)
+                UpdateList()
+                UpdateAutoloadLabel()
+            end
+        })
+
+        self:SetIgnoreIndexes({ "SaveManager_ConfigList", "SaveManager_ConfigName", "SaveManager_AccountExclusive", "SaveManager_ApplyAutoload" })
+    end
+
+    SaveManager:BuildFolderTree()
+end
+
+return SaveManager
