@@ -5114,6 +5114,100 @@ function Library:CreateRadioGroup(parent, options)
     return rgObj
 end
 
+-- ── CreateSegmentedButtons ────────────────────────────────────────
+-- Mutually exclusive buttons that fill the full row width, split evenly
+-- across however many options are given (1 option = full width, 2 = 50/50,
+-- 3 = a third each, etc.) — unlike CreateRadioGroup, which auto-sizes each
+-- pill to its text instead of stretching to fill the section.
+-- opts: Name, Options (string array), Default, Flag, Callback(selected)
+function Library:CreateSegmentedButtons(parent, options)
+    local sbName   = options.Name or ""
+    local opts     = options.Options or {}
+    local default  = options.Default or (opts[1] or "")
+    local flag     = options.Flag
+    local callback = options.Callback or function() end
+
+    local selected = default
+    local buttons  = {}
+    local n = math.max(#opts, 1)
+    local hasName = sbName ~= ""
+
+    local wrapper = Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 0),
+        BackgroundTransparency = 1,
+        AutomaticSize = Enum.AutomaticSize.Y,
+        Parent = parent
+    })
+
+    if hasName then
+        local nameLbl = Create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
+            Text = sbName, TextColor3 = self.Theme.TextDim,
+            Font = Enum.Font.Gotham, TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left, Parent = wrapper
+        })
+        self:RegisterElement(nameLbl, "TextDim", "TextColor3")
+    end
+
+    local row = Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 28),
+        Position = UDim2.new(0, 0, 0, hasName and 16 or 0),
+        BackgroundTransparency = 1,
+        Parent = wrapper
+    }, {
+        Create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 4)
+        })
+    })
+
+    local function updateButtons()
+        for optName, btn in pairs(buttons) do
+            local active = (optName == selected)
+            Tween(btn, { BackgroundColor3 = active and Library.Theme.Accent or Library.Theme.InputBg })
+            btn.TextColor3 = active and Color3.new(1, 1, 1) or Library.Theme.TextDim
+        end
+    end
+
+    for i, optName in ipairs(opts) do
+        local slotW = math.floor((1 / n) * 1000) / 1000
+        local btn = Create("TextButton", {
+            Size = UDim2.new(slotW, i == n and 0 or -4, 1, 0),
+            BackgroundColor3 = self.Theme.InputBg,
+            Text = optName,
+            TextColor3 = self.Theme.TextDim,
+            Font = Enum.Font.GothamMedium, TextSize = 11,
+            BorderSizePixel = 0,
+            AutoButtonColor = false, LayoutOrder = i, Parent = row
+        }, {
+            Create("UICorner", { CornerRadius = UDim.new(1, 0) }),
+            Create("UIStroke", { Color = self.Theme.Border, Thickness = 1 })
+        })
+        self:RegisterElement(btn:FindFirstChildWhichIsA("UIStroke"), "Border", "Color")
+        buttons[optName] = btn
+
+        btn.MouseButton1Click:Connect(function()
+            selected = optName
+            updateButtons()
+            callback(selected)
+        end)
+    end
+
+    updateButtons()
+
+    local sbObj = { Value = selected, Instance = wrapper }
+    function sbObj:SetValue(v)
+        selected = v
+        sbObj.Value = v
+        updateButtons()
+        callback(v)
+    end
+
+    if flag then self.Flags[flag] = sbObj end
+    return sbObj
+end
+
 -- ── CreateLiveLabel ───────────────────────────────────────────────
 -- Auto-polling label; calls GetValue() every Interval seconds.
 -- opts: Name, GetValue (→string), Interval (def 1), Prefix, Suffix
@@ -5547,6 +5641,14 @@ function Library:CreateSection(parent, name, iconName)
             AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = nextOrder(), Parent = container
         })
         return Library:CreateRadioGroup(f, opts)
+    end
+
+    function S:AddSegmentedButtons(opts)
+        local f = Create("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1,
+            AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = nextOrder(), Parent = container
+        })
+        return Library:CreateSegmentedButtons(f, opts)
     end
 
     function S:AddLiveLabel(opts)
