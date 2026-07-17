@@ -3946,6 +3946,28 @@ function Library:CreateWindow(options)
         splashText:Destroy()
         task.wait(0.2)
 
+        -- Phase 1.5: executor compatibility warning (own floating-text phase,
+        -- same style as the splash text above, shown before the loading card)
+        local warningText = Create("TextLabel", {
+            Name = "WarningText",
+            Size = UDim2.new(0.8, 0, 1, 0),
+            Position = UDim2.new(0.1, 0, 0, 0),
+            BackgroundTransparency = 1,
+            Text = "Warning: Not fully supported on lower/bad executors (e.g. Xeno, Solara)",
+            TextWrapped = true,
+            TextColor3 = self.Theme.Warning,
+            Font = Enum.Font.GothamBlack, TextSize = 22,
+            TextTransparency = 1,
+            ZIndex = 1200, Parent = gui
+        })
+        local warnInTween = TweenService:Create(warningText, TweenInfo.new(0.4), { TextTransparency = 0 })
+        warnInTween:Play(); warnInTween.Completed:Wait()
+        task.wait(1.3)
+        local warnOutTween = TweenService:Create(warningText, TweenInfo.new(0.5), { TextTransparency = 1 })
+        warnOutTween:Play(); warnOutTween.Completed:Wait()
+        warningText:Destroy()
+        task.wait(0.2)
+
         -- Loading card fade-in
         local stroke = loadScreen:FindFirstChildWhichIsA("UIStroke")
         Tween(loadScreen, { BackgroundTransparency = 0.06 }, 0.35)
@@ -3958,8 +3980,6 @@ function Library:CreateWindow(options)
 
         loadStatus.Text = "Loading Assets..."
         task.wait(0.55)
-        loadStatus.Text = "Warning: not fully supported on Xeno/Solara"
-        task.wait(1.1)
         loadStatus.Text = "Initializing UI..."
         task.wait(0.55)
         loadStatus.Text = "Complete!"
