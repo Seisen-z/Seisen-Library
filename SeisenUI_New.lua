@@ -51,18 +51,6 @@ local Library = {
     NotificationsEnabled = true,
 }
 
--- ── Executor compatibility warning ───────────────────────────────
--- Fires automatically for every script that loads this library (Notify only needs
--- self.Theme, which is already set above) -- no per-script Notify call needed.
--- Unconditional, same as any other startup Notify call -- no executor detection,
--- since executors don't consistently expose identifyexecutor()/getexecutorname().
-Library:Notify({
-    Title    = "Warning",
-    Content  = "This script is not fully supported on lower/bad executors (e.g. Xeno, Solara). Some features may not work correctly.",
-    Duration = 8,
-    Type     = "warning",
-})
-
 -- ── Keybind panel row ────────────────────────────────────────────
 function Library:RegisterKeybindRow(name, getKeyFn, isToggle, getValueFn)
     if not self.KeybindFrame then return end
@@ -3970,6 +3958,8 @@ function Library:CreateWindow(options)
 
         loadStatus.Text = "Loading Assets..."
         task.wait(0.55)
+        loadStatus.Text = "Warning: not fully supported on Xeno/Solara"
+        task.wait(1.1)
         loadStatus.Text = "Initializing UI..."
         task.wait(0.55)
         loadStatus.Text = "Complete!"
