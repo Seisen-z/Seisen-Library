@@ -3946,26 +3946,63 @@ function Library:CreateWindow(options)
         splashText:Destroy()
         task.wait(0.2)
 
-        -- Phase 1.5: executor compatibility warning (own floating-text phase,
-        -- same style as the splash text above, shown before the loading card)
-        local warningText = Create("TextLabel", {
-            Name = "WarningText",
-            Size = UDim2.new(0.8, 0, 1, 0),
-            Position = UDim2.new(0.1, 0, 0, 0),
+        -- Phase 1.5: executor compatibility warning -- bordered card, same
+        -- construction as the loading card below (background + corner + stroke),
+        -- so it's actually readable over the game instead of bare floating text
+        local warningCard = Create("Frame", {
+            Name = "WarningCard",
+            Size = UDim2.fromOffset(360, 92),
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            BackgroundColor3 = self.Theme.Element,
             BackgroundTransparency = 1,
-            Text = "Warning: Not fully supported on lower/bad executors (e.g. Xeno, Solara)",
-            TextWrapped = true,
-            TextColor3 = self.Theme.Warning,
-            Font = Enum.Font.GothamBlack, TextSize = 22,
-            TextTransparency = 1,
-            ZIndex = 1200, Parent = gui
+            BorderSizePixel = 0, ZIndex = 1200, Parent = gui
+        }, {
+            Create("UICorner", { CornerRadius = UDim.new(0, 12) }),
+            Create("UIStroke", { Color = self.Theme.Warning, Thickness = 1.5, Transparency = 1 }),
         })
-        local warnInTween = TweenService:Create(warningText, TweenInfo.new(0.4), { TextTransparency = 0 })
-        warnInTween:Play(); warnInTween.Completed:Wait()
-        task.wait(1.3)
-        local warnOutTween = TweenService:Create(warningText, TweenInfo.new(0.5), { TextTransparency = 1 })
-        warnOutTween:Play(); warnOutTween.Completed:Wait()
-        warningText:Destroy()
+        local warningIcon = Create("ImageLabel", {
+            Size = UDim2.new(0, 20, 0, 20),
+            Position = UDim2.new(0, 16, 0, 14),
+            BackgroundTransparency = 1,
+            ImageColor3 = self.Theme.Warning, ImageTransparency = 1,
+            ZIndex = 1201, Parent = warningCard
+        })
+        self:ApplyIcon(warningIcon, "alert-triangle")
+        local warningTitle = Create("TextLabel", {
+            Size = UDim2.new(1, -48, 0, 20), Position = UDim2.new(0, 44, 0, 12),
+            BackgroundTransparency = 1, Text = "Warning",
+            TextColor3 = self.Theme.Text, TextTransparency = 1,
+            Font = Enum.Font.GothamBold, TextSize = 15,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 1201, Parent = warningCard
+        })
+        local warningBody = Create("TextLabel", {
+            Size = UDim2.new(1, -32, 0, 44), Position = UDim2.new(0, 16, 0, 38),
+            BackgroundTransparency = 1,
+            Text = "Not fully supported on lower/bad executors (e.g. Xeno, Solara). Some features may not work correctly.",
+            TextWrapped = true,
+            TextColor3 = self.Theme.TextDim, TextTransparency = 1,
+            Font = Enum.Font.Gotham, TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            ZIndex = 1201, Parent = warningCard
+        })
+
+        local wStroke = warningCard:FindFirstChildWhichIsA("UIStroke")
+        Tween(warningCard, { BackgroundTransparency = 0.06 }, 0.35)
+        if wStroke then Tween(wStroke, { Transparency = 0.15 }, 0.35) end
+        Tween(warningIcon,  { ImageTransparency = 0 }, 0.35)
+        Tween(warningTitle, { TextTransparency = 0 }, 0.35)
+        Tween(warningBody,  { TextTransparency = 0 }, 0.35)
+        task.wait(1.6)
+        Tween(warningCard, { BackgroundTransparency = 1 }, 0.35)
+        if wStroke then Tween(wStroke, { Transparency = 1 }, 0.35) end
+        Tween(warningIcon,  { ImageTransparency = 1 }, 0.35)
+        Tween(warningTitle, { TextTransparency = 1 }, 0.35)
+        Tween(warningBody,  { TextTransparency = 1 }, 0.35)
+        task.wait(0.4)
+        pcall(function() warningCard:Destroy() end)
         task.wait(0.2)
 
         -- Loading card fade-in
