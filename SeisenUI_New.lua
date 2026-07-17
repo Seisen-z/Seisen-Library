@@ -54,31 +54,14 @@ local Library = {
 -- ── Executor compatibility warning ───────────────────────────────
 -- Fires automatically for every script that loads this library (Notify only needs
 -- self.Theme, which is already set above) -- no per-script Notify call needed.
-do
-    local BadExecutorPatterns = { "xeno", "solara" }
-    local ok, execName = pcall(function()
-        if identifyexecutor then
-            return (identifyexecutor())
-        elseif getexecutorname then
-            return getexecutorname()
-        end
-        return nil
-    end)
-    if ok and type(execName) == "string" then
-        local lowerName = execName:lower()
-        for _, pattern in ipairs(BadExecutorPatterns) do
-            if lowerName:find(pattern, 1, true) then
-                Library:Notify({
-                    Title    = "Warning",
-                    Content  = "This script is not fully supported on " .. execName .. ". Some features may not work correctly.",
-                    Duration = 8,
-                    Type     = "warning",
-                })
-                break
-            end
-        end
-    end
-end
+-- Unconditional, same as any other startup Notify call -- no executor detection,
+-- since executors don't consistently expose identifyexecutor()/getexecutorname().
+Library:Notify({
+    Title    = "Warning",
+    Content  = "This script is not fully supported on lower/bad executors (e.g. Xeno, Solara). Some features may not work correctly.",
+    Duration = 8,
+    Type     = "warning",
+})
 
 -- ── Keybind panel row ────────────────────────────────────────────
 function Library:RegisterKeybindRow(name, getKeyFn, isToggle, getValueFn)
