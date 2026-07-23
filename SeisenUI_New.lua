@@ -1328,6 +1328,62 @@ function Library:CreateDropdown(parent, options)
 
     buildList(allItems)
 
+    local isOpen = false
+    local openUpward = false
+
+    local function updateDropdownPosition(ph)
+        local curH = (ph or panelHeight) + SEARCH_H
+        panel.Size = UDim2.new(1, 0, 0, ph or panelHeight)
+
+        local camera = workspace.CurrentCamera
+        local viewportY = camera and camera.ViewportSize.Y or 1000
+
+        if self._mainWindow then
+            panelWrap.Parent = self._mainWindow
+            local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
+            local fieldX = (field.AbsolutePosition.X - self._mainWindow.AbsolutePosition.X) / scale
+            local fieldY = (field.AbsolutePosition.Y - self._mainWindow.AbsolutePosition.Y) / scale
+            local mainH = self._mainWindow.AbsoluteSize.Y / scale
+
+            local spaceBelow = mainH - (fieldY + DROP_H)
+            local spaceAbove = fieldY
+
+            local screenFieldBottom = field.AbsolutePosition.Y + field.AbsoluteSize.Y
+            local screenSpaceBelow = (viewportY - screenFieldBottom) / scale
+            local screenSpaceAbove = field.AbsolutePosition.Y / scale
+
+            if (spaceBelow < curH or screenSpaceBelow < curH) and (spaceAbove >= curH or screenSpaceAbove > screenSpaceBelow) then
+                openUpward = true
+            else
+                openUpward = false
+            end
+
+            panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, curH)
+            if openUpward then
+                panelWrap.Position = UDim2.fromOffset(fieldX, fieldY - curH - 2)
+            else
+                panelWrap.Position = UDim2.fromOffset(fieldX, fieldY + DROP_H + 2)
+            end
+        else
+            local screenFieldBottom = field.AbsolutePosition.Y + field.AbsoluteSize.Y
+            local screenSpaceBelow = viewportY - screenFieldBottom
+            local screenSpaceAbove = field.AbsolutePosition.Y
+
+            if screenSpaceBelow < curH and screenSpaceAbove > screenSpaceBelow then
+                openUpward = true
+            else
+                openUpward = false
+            end
+
+            panelWrap.Size = UDim2.new(1, 0, 0, curH)
+            if openUpward then
+                panelWrap.Position = UDim2.new(0, 0, 0, -curH - 2)
+            else
+                panelWrap.Position = UDim2.new(0, 0, 0, DROP_H + 2)
+            end
+        end
+    end
+
     local function filterList(q)
         q = (q or ""):lower()
         local visibleCount = 0
@@ -1342,13 +1398,17 @@ function Library:CreateDropdown(parent, options)
         end
         local ph = math.min(visibleCount > 0 and visibleCount or 1, maxVisible) * ITEM_H + 8
         panel.CanvasSize = UDim2.new(0, 0, 0, visibleCount * ITEM_H + 4)
-        if panelWrap.Parent == self._mainWindow then
-            local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
-            panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, ph + SEARCH_H)
-            panel.Size = UDim2.new(1, 0, 0, ph)
+        if isOpen then
+            updateDropdownPosition(ph)
         else
-            panelWrap.Size = UDim2.new(1, 0, 0, ph + SEARCH_H)
-            panel.Size = UDim2.new(1, 0, 0, ph)
+            if panelWrap.Parent == self._mainWindow then
+                local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
+                panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, ph + SEARCH_H)
+                panel.Size = UDim2.new(1, 0, 0, ph)
+            else
+                panelWrap.Size = UDim2.new(1, 0, 0, ph + SEARCH_H)
+                panel.Size = UDim2.new(1, 0, 0, ph)
+            end
         end
     end
 
@@ -1358,27 +1418,17 @@ function Library:CreateDropdown(parent, options)
         end)
     end
 
-    local isOpen = false
     local function openPanel()
         isOpen = true
         self:_showDropdownVeil()
-        if searchBox then searchBox.Text = "" filterList("") end
-        if self._mainWindow then
-            panelWrap.Parent = self._mainWindow
-            local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
-            panelWrap.Position = UDim2.fromOffset(
-                (field.AbsolutePosition.X - self._mainWindow.AbsolutePosition.X) / scale,
-                (field.AbsolutePosition.Y - self._mainWindow.AbsolutePosition.Y) / scale + DROP_H + 2
-            )
-            panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, panelHeight + SEARCH_H)
-            panel.Size = UDim2.new(1, 0, 0, panelHeight)
-        end
+        if searchBox then searchBox.Text = "" filterList("") else updateDropdownPosition(panelHeight) end
         panelWrap.Visible = true
         Tween(chevron, { ImageColor3 = self.Theme.Accent })
         Tween(fieldStroke, { Color = self.Theme.Accent })
         table.insert(self.OpenDropdowns, function()
             if isOpen then
                 isOpen = false
+                openUpward = false
                 panelWrap.Visible = false
                 panelWrap.Parent = container
                 panelWrap.Position = UDim2.new(0, 0, 0, DROP_H + 2)

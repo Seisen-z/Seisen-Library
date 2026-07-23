@@ -1128,14 +1128,22 @@ function Library:CreateDropdown(parent, options)
     local posConnection
     local function updateListPosition()
         if isOpen and selectBtn and selectBtn.Parent then
-            -- AbsolutePosition/AbsoluteSize are already in screen pixels.
-            -- The list is parented to ScreenGui (no extra UIScale), so use them directly.
-            -- We DO NOT divide by the MainScale.Scale – that was the mobile bug.
             local absPos = selectBtn.AbsolutePosition
             local absSize = selectBtn.AbsoluteSize
-            listScale.Scale = 1  -- list lives at root level; no inherited scale to compensate for
-            list.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 5)
-            list.Size = UDim2.fromOffset(absSize.X, math.min(#opts * 22 + 10, 150))
+            listScale.Scale = 1
+            local listHeight = math.min(#opts * 22 + 10, 150)
+
+            local camera = workspace.CurrentCamera
+            local screenH = camera and camera.ViewportSize.Y or 1000
+            local spaceBelow = screenH - (absPos.Y + absSize.Y)
+            local spaceAbove = absPos.Y
+
+            if spaceBelow < listHeight and spaceAbove >= spaceBelow then
+                list.Position = UDim2.fromOffset(absPos.X, absPos.Y - listHeight - 5)
+            else
+                list.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 5)
+            end
+            list.Size = UDim2.fromOffset(absSize.X, listHeight)
         end
     end
     local dropObj = {
