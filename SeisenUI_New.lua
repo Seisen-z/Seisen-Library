@@ -1220,19 +1220,37 @@ function Library:CreateDropdown(parent, options)
     fieldLabel.Text = getDisplayText()
 
     local dropObj  -- forward ref so click handler can sync dropObj.Value
-    local itemButtons = {}
-    local function rebuildItems(list)
-        for _, b in pairs(itemButtons) do b:Destroy() end; itemButtons = {}
+    local itemEntries = {}
+
+    local function updateVisuals()
+        for _, entry in ipairs(itemEntries) do
+            if not entry.IsDivider then
+                local isSel = isMulti and (value[entry.Item] == true) or (value == entry.Item)
+                entry.Btn.BackgroundColor3 = isSel and self.Theme.AccentDark or self.Theme.Element
+                entry.Lbl.TextColor3 = isSel and self.Theme.Accent or self.Theme.Text
+                if entry.Check then
+                    entry.Check.Visible = isSel and true or false
+                end
+            end
+        end
+    end
+
+    local function buildList(list)
+        for _, entry in ipairs(itemEntries) do
+            if entry.Btn then entry.Btn:Destroy() end
+        end
+        itemEntries = {}
         panel.CanvasSize = UDim2.new(0, 0, 0, #list * ITEM_H + 4)
-        panelHeight = math.min(#list, maxVisible) * ITEM_H + 8
+        local ph = math.min(#list, maxVisible) * ITEM_H + 8
         if panelWrap.Parent == self._mainWindow then
             local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
-            panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, panelHeight + SEARCH_H)
-            panel.Size = UDim2.new(1, 0, 0, panelHeight)
+            panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, ph + SEARCH_H)
+            panel.Size = UDim2.new(1, 0, 0, ph)
         else
-            panelWrap.Size = UDim2.new(1, 0, 0, panelHeight + SEARCH_H)
-            panel.Size = UDim2.new(1, 0, 0, panelHeight)
+            panelWrap.Size = UDim2.new(1, 0, 0, ph + SEARCH_H)
+            panel.Size = UDim2.new(1, 0, 0, ph)
         end
+
         for i, item in ipairs(list) do
             local itemStr = tostring(item)
             local isDivider = itemStr:match("^%-%-%-") ~= nil
@@ -1244,15 +1262,12 @@ function Library:CreateDropdown(parent, options)
                     Create("TextLabel", {
                         Size = UDim2.new(1, 0, 1, 0),
                         BackgroundTransparency = 1,
-                        Text = itemStr,
-                        TextColor3 = self.Theme.TextDim,
-                        Font = Enum.Font.GothamBold,
-                        TextSize = 10,
-                        TextXAlignment = Enum.TextXAlignment.Center,
-                        ZIndex = 53
+                        Text = itemStr, TextColor3 = self.Theme.TextDim,
+                        Font = Enum.Font.GothamBold, TextSize = 10,
+                        TextXAlignment = Enum.TextXAlignment.Center, ZIndex = 53
                     })
                 })
-                table.insert(itemButtons, div)
+                table.insert(itemEntries, { Btn = div, IsDivider = true, ItemStr = itemStr })
             else
                 local isSelected = isMulti and (value[item] == true) or (value == item)
                 local btn = Create("TextButton", {
@@ -1260,30 +1275,33 @@ function Library:CreateDropdown(parent, options)
                     BackgroundColor3 = isSelected and self.Theme.AccentDark or self.Theme.Element,
                     Text = "", AutoButtonColor = false, LayoutOrder = i, ZIndex = 52, Parent = panel
                 }, {
-                    Create("UICorner", { CornerRadius = UDim.new(0, 6) }),
-                    Create("TextLabel", {
-                        Size = UDim2.new(1, isMulti and -26 or -10, 1, 0), Position = UDim2.new(0, 10, 0, 0),
-                        BackgroundTransparency = 1, Text = itemStr,
-                        TextColor3 = isSelected and self.Theme.Accent or self.Theme.Text,
-                        Font = Enum.Font.Gotham, TextSize = 12,
-                        TextXAlignment = Enum.TextXAlignment.Left,
-                        TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 53
-                    })
+                    Create("UICorner", { CornerRadius = UDim.new(0, 6) })
                 })
+                local lbl = Create("TextLabel", {
+                    Size = UDim2.new(1, isMulti and -26 or -10, 1, 0), Position = UDim2.new(0, 10, 0, 0),
+                    BackgroundTransparency = 1, Text = itemStr,
+                    TextColor3 = isSelected and self.Theme.Accent or self.Theme.Text,
+                    Font = Enum.Font.Gotham, TextSize = 12,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 53, Parent = btn
+                })
+                local checkLabel = nil
                 if isMulti then
-                    Create("Frame", {
+                    local ckFrame = Create("Frame", {
                         Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -20, 0.5, -7),
                         BackgroundColor3 = isSelected and self.Theme.Accent or self.Theme.InputBg,
                         ZIndex = 53, Parent = btn
                     }, {
                         Create("UICorner", { CornerRadius = UDim.new(0, 4) }),
-                        Create("UIStroke", { Color = self.Theme.Border, Thickness = 1 }),
-                        (isSelected and Create("TextLabel", {
-                            Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
-                            Text = "✓", TextColor3 = Color3.new(1,1,1), Font = Enum.Font.GothamBold, TextSize = 10, ZIndex = 54
-                        }) or nil)
+                        Create("UIStroke", { Color = self.Theme.Border, Thickness = 1 })
+                    })
+                    checkLabel = Create("TextLabel", {
+                        Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
+                        Text = "✓", TextColor3 = Color3.new(1,1,1), Font = Enum.Font.GothamBold, TextSize = 10, ZIndex = 54,
+                        Visible = isSelected and true or false, Parent = ckFrame
                     })
                 end
+
                 btn.MouseEnter:Connect(function()
                     if not (isMulti and value[item]) and value ~= item then
                         Tween(btn, { BackgroundColor3 = self.Theme.ElementHover })
@@ -1297,28 +1315,46 @@ function Library:CreateDropdown(parent, options)
                     if isMulti then
                         if value[item] then value[item] = nil else value[item] = true end
                     else value = item end
-                    -- Keep dropObj.Value in sync so SaveManager reads the correct value
                     if dropObj then dropObj.Value = value end
                     fieldLabel.Text = getDisplayText()
-                    rebuildItems(list)
+                    updateVisuals()
                     callback(value)
                 end)
-                table.insert(itemButtons, btn)
+
+                table.insert(itemEntries, { Btn = btn, Lbl = lbl, Check = checkLabel, Item = item, ItemStr = itemStr, IsDivider = false })
             end
         end
     end
-    rebuildItems(items)
+
+    buildList(allItems)
+
+    local function filterList(q)
+        q = (q or ""):lower()
+        local visibleCount = 0
+        for _, entry in ipairs(itemEntries) do
+            if entry.IsDivider then
+                entry.Btn.Visible = (q == "")
+            else
+                local match = (q == "") or (entry.ItemStr:lower():find(q, 1, true) ~= nil)
+                entry.Btn.Visible = match
+                if match then visibleCount = visibleCount + 1 end
+            end
+        end
+        local ph = math.min(visibleCount > 0 and visibleCount or 1, maxVisible) * ITEM_H + 8
+        panel.CanvasSize = UDim2.new(0, 0, 0, visibleCount * ITEM_H + 4)
+        if panelWrap.Parent == self._mainWindow then
+            local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
+            panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, ph + SEARCH_H)
+            panel.Size = UDim2.new(1, 0, 0, ph)
+        else
+            panelWrap.Size = UDim2.new(1, 0, 0, ph + SEARCH_H)
+            panel.Size = UDim2.new(1, 0, 0, ph)
+        end
+    end
 
     if searchBox then
         searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-            local q = searchBox.Text:lower()
-            local filtered = {}
-            for _, it in ipairs(allItems) do
-                if q == "" or tostring(it):lower():find(q, 1, true) then
-                    table.insert(filtered, it)
-                end
-            end
-            rebuildItems(filtered)
+            filterList(searchBox.Text)
         end)
     end
 
@@ -1326,7 +1362,7 @@ function Library:CreateDropdown(parent, options)
     local function openPanel()
         isOpen = true
         self:_showDropdownVeil()
-        if searchBox then searchBox.Text = "" rebuildItems(allItems) end
+        if searchBox then searchBox.Text = "" filterList("") end
         if self._mainWindow then
             panelWrap.Parent = self._mainWindow
             local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
@@ -1353,16 +1389,6 @@ function Library:CreateDropdown(parent, options)
             end
         end)
     end
-    local function closePanel()
-        isOpen = false
-        panelWrap.Visible = false
-        panelWrap.Parent = container
-        panelWrap.Position = UDim2.new(0, 0, 0, DROP_H + 2)
-        panelWrap.Size = UDim2.new(1, 0, 0, panelHeight + SEARCH_H)
-        panel.Size = UDim2.new(1, 0, 0, panelHeight)
-        Tween(chevron, { ImageColor3 = self.Theme.TextDim })
-        Tween(fieldStroke, { Color = self.Theme.Border })
-    end
 
     field.MouseButton1Click:Connect(function()
         local wasOpen = isOpen
@@ -1382,13 +1408,18 @@ function Library:CreateDropdown(parent, options)
                     end
                 end
             else value = val end
-            s.Value = value; fieldLabel.Text = getDisplayText(); rebuildItems(items); callback(value)
+            s.Value = value
+            fieldLabel.Text = getDisplayText()
+            updateVisuals()
+            callback(value)
         end,
         Refresh = function(s, newList, reset)
             items = newList; allItems = {table.unpack(newList)}
             if reset then value = isMulti and {} or nil end
             if searchBox then searchBox.Text = "" end
-            s.Value = value; fieldLabel.Text = getDisplayText(); rebuildItems(newList)
+            s.Value = value
+            fieldLabel.Text = getDisplayText()
+            buildList(allItems)
         end,
     }
 
@@ -1977,16 +2008,16 @@ function Library:CreateSearchableDropdown(parent, options)
 
     searchBox.Focused:Connect(function()
         if fieldStroke then Tween(fieldStroke, { Color = self.Theme.Accent }) end
-        if isMulti then searchBox.Text = "" end
         filterItems(searchBox.Text)
     end)
     searchBox:GetPropertyChangedSignal("Text"):Connect(function() filterItems(searchBox.Text) end)
     searchBox.FocusLost:Connect(function()
-        task.delay(0.15, function()
-            panel.Visible = false
-            container.Size = UDim2.new(1, 0, 0, 44)
-            if fieldStroke then Tween(fieldStroke, { Color = self.Theme.Border }) end
-            if isMulti then searchBox.Text = "" end
+        if fieldStroke then Tween(fieldStroke, { Color = self.Theme.Border }) end
+        task.delay(0.2, function()
+            if not searchBox:IsFocused() then
+                panel.Visible = false
+                container.Size = UDim2.new(1, 0, 0, 44)
+            end
         end)
     end)
 
