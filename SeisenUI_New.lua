@@ -1465,27 +1465,24 @@ function Library:CreateDropdown(parent, options)
         end,
         Refresh = function(s, newList, reset)
             items = newList; allItems = {table.unpack(newList)}
-            if reset then value = isMulti and {} or nil end
-            if searchBox then searchBox.Text = "" end
+            if reset then
+                value = isMulti and {} or nil
+                if searchBox then searchBox.Text = "" end
+            end
             s.Value = value
             fieldLabel.Text = getDisplayText()
             buildList(allItems)
+            if searchBox and searchBox.Text ~= "" then
+                filterList(searchBox.Text)
+            end
         end,
     }
 
     table.insert(self.Registry, {
         Callback = function()
             if container and container.Parent then
-                local q = searchBox and searchBox.Text:lower() or ""
-                if q ~= "" then
-                    local filtered = {}
-                    for _, it in ipairs(allItems) do
-                        if tostring(it):lower():find(q, 1, true) then table.insert(filtered, it) end
-                    end
-                    rebuildItems(filtered)
-                else
-                    rebuildItems(items)
-                end
+                local q = searchBox and searchBox.Text or ""
+                filterList(q)
             end
         end
     })
@@ -3265,7 +3262,7 @@ function Library:EnsureStatsWidget()
             ShowFPS = true,
             ShowPing = true,
             ShowMemory = true,
-            ShowInstances = true
+            ShowInstances = false
         })
     end
     return self._statsWidget
@@ -7700,8 +7697,10 @@ function Library:CreateWidget(options)
     local showInstances = opts.ShowInstances or false
 
     local width = 115
-    if showMemory or showInstances then
-        width = 175
+    if showMemory and showInstances then
+        width = 205
+    elseif showMemory or showInstances then
+        width = 160
     end
 
     -- Separate always-on ScreenGui so the widget stays visible when the library is hidden.
