@@ -3718,16 +3718,16 @@ function Library:CreateWindow(options)
             self:Unload()
         end)
     end)
-    local minimised = false
     minBtn.MouseButton1Click:Connect(function()
-        minimised = not minimised
-        Tween(main, { Size = minimised and UDim2.new(0, WIN_W, 0, 36) or UDim2.new(0, WIN_W, 0, WIN_H) }, 0.22)
-        Tween(minBtn, { BackgroundTransparency = minimised and 0.45 or 0 })
-        sidebar.Visible = not minimised
-        Tween(content, {
-            Position = minimised and UDim2.new(0, 0, 0, 0) or UDim2.new(0, SIDE_W, 0, 0),
-            Size = minimised and UDim2.new(1, 0, 1, 0) or UDim2.new(1, -SIDE_W, 1, 0)
-        }, 0.22)
+        self:Toggle()
+        if not self.ScreenGui.Enabled then
+            if not self._widgetGui then
+                pcall(function() self:CreateWidget() end)
+            end
+            if self._widgetGui then
+                self._widgetGui.Enabled = true
+            end
+        end
     end)
     local maximised = false
     maxBtn.MouseButton1Click:Connect(function()
@@ -5110,7 +5110,13 @@ function Library:CreateRadioGroup(parent, options)
         callback(v)
     end
 
-    if flag then self.Flags[flag] = rgObj end
+    -- Also register into Options: SaveConfig/LoadConfig only ever read
+    -- Toggles and Options, never Flags, so a Flags-only entry silently
+    -- never persists across a save/load cycle.
+    if flag then
+        self.Flags[flag] = rgObj
+        self.Options[flag] = rgObj
+    end
     return rgObj
 end
 
@@ -5204,7 +5210,13 @@ function Library:CreateSegmentedButtons(parent, options)
         callback(v)
     end
 
-    if flag then self.Flags[flag] = sbObj end
+    -- Also register into Options: SaveConfig/LoadConfig only ever read
+    -- Toggles and Options, never Flags, so a Flags-only entry silently
+    -- never persists across a save/load cycle.
+    if flag then
+        self.Flags[flag] = sbObj
+        self.Options[flag] = sbObj
+    end
     return sbObj
 end
 
@@ -7664,9 +7676,9 @@ function Library:CreateWidget(options)
     local showMemory = opts.ShowMemory or false
     local showInstances = opts.ShowInstances or false
 
-    local width = 130
+    local width = 115
     if showMemory or showInstances then
-        width = 220
+        width = 175
     end
 
     -- Separate always-on ScreenGui so the widget stays visible when the library is hidden.
@@ -7687,13 +7699,13 @@ function Library:CreateWidget(options)
 
     local widget = Create("Frame", {
         Name = "Widget",
-        Size = UDim2.new(0, width, 0, 52),
+        Size = UDim2.new(0, width, 0, 36),
         Position = UDim2.new(0, 12, 0, 12),
         BackgroundColor3 = self.Theme.Element,
         BorderSizePixel = 0, ZIndex = 10,
         Parent = self._widgetGui
     }, {
-        Create("UICorner", { CornerRadius = UDim.new(0, 12) }),
+        Create("UICorner", { CornerRadius = UDim.new(0, 10) }),
         Create("UIStroke", { Color = self.Theme.Border, Thickness = 1 })
     })
     self:RegisterElement(widget, "Element")
@@ -7708,8 +7720,8 @@ function Library:CreateWidget(options)
         )
     end)
     local iconCircle = Create("Frame", {
-        Size = UDim2.new(0, 32, 0, 32),
-        Position = UDim2.new(0, 10, 0.5, -16),
+        Size = UDim2.new(0, 24, 0, 24),
+        Position = UDim2.new(0, 6, 0.5, -12),
         BackgroundColor3 = self.Theme.Accent, ZIndex = 11, Parent = widget
     }, {
         Create("UICorner", { CornerRadius = UDim.new(1, 0) })
@@ -7724,22 +7736,22 @@ function Library:CreateWidget(options)
         Create("TextLabel", {
             Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
             Text = title:sub(1,1):upper(), TextColor3 = Color3.new(1,1,1),
-            Font = Enum.Font.GothamBold, TextSize = 14, ZIndex = 12,
+            Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 12,
             Parent = iconCircle
         })
     end
     self:RegisterElement(iconCircle, "Accent")
 
     local titleLbl = Create("TextLabel", {
-        Size = UDim2.new(1, -52, 0, 14), Position = UDim2.new(0, 48, 0, 8),
+        Size = UDim2.new(1, -38, 0, 12), Position = UDim2.new(0, 36, 0, 4),
         BackgroundTransparency = 1, Text = title,
-        TextColor3 = self.Theme.Text, Font = Enum.Font.GothamBold, TextSize = 11,
+        TextColor3 = self.Theme.Text, Font = Enum.Font.GothamBold, TextSize = 10,
         TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 11, Parent = widget
     })
     self:RegisterElement(titleLbl, "Text", "TextColor3")
 
     local statsLbl = Create("TextLabel", {
-        Size = UDim2.new(1, -52, 0, 12), Position = UDim2.new(0, 48, 0, 26),
+        Size = UDim2.new(1, -38, 0, 12), Position = UDim2.new(0, 36, 0, 18),
         BackgroundTransparency = 1, Text = "",
         TextColor3 = self.Theme.TextDim, Font = Enum.Font.Gotham, TextSize = 9,
         TextXAlignment = Enum.TextXAlignment.Left, ZIndex = 11, Parent = widget
