@@ -1261,10 +1261,23 @@ function Library:CreateDropdown(parent, options)
     function dropObj:Refresh(newOptions, keepCurrent)
         opts = newOptions or {}
         if not keepCurrent then
-            currentVal = isMulti and {} or (opts[1])
+            currentVal = isMulti and {} or (opts[1] or "None")
             dropObj.Value = currentVal
             displayLabel.Text = getDisplayVal()
             callback(currentVal)
+        else
+            if not isMulti then
+                local valid = false
+                for _, o in ipairs(opts) do
+                    if tostring(o) == tostring(currentVal) then valid = true break end
+                end
+                if not valid then
+                    currentVal = opts[1] or "None"
+                    dropObj.Value = currentVal
+                    displayLabel.Text = getDisplayVal()
+                    callback(currentVal)
+                end
+            end
         end
         populate()
     end
