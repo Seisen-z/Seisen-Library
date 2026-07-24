@@ -1457,7 +1457,21 @@ function Library:CreateDropdown(parent, options)
                         elseif type(k) == "string" and v then value[k] = true end
                     end
                 end
-            else value = val end
+            else
+                local isValid = false
+                if val == "None" or val == nil then
+                    isValid = true
+                else
+                    for _, item in ipairs(allItems) do
+                        if tostring(item) == tostring(val) then isValid = true break end
+                    end
+                end
+                if isValid then
+                    value = val
+                else
+                    value = options.Default or allItems[1] or "None"
+                end
+            end
             s.Value = value
             fieldLabel.Text = getDisplayText()
             updateVisuals()
@@ -1465,9 +1479,17 @@ function Library:CreateDropdown(parent, options)
         end,
         Refresh = function(s, newList, reset)
             items = newList; allItems = {table.unpack(newList)}
-            if reset then
-                value = isMulti and {} or nil
-                if searchBox then searchBox.Text = "" end
+            if searchBox then searchBox.Text = "" end
+            
+            local isValid = false
+            if not isMulti then
+                for _, opt in ipairs(allItems) do
+                    if tostring(opt) == tostring(value) then isValid = true break end
+                end
+            end
+
+            if reset or not isValid then
+                value = isMulti and {} or (options.Default or allItems[1] or "None")
             end
             s.Value = value
             fieldLabel.Text = getDisplayText()
