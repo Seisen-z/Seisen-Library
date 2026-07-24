@@ -1161,7 +1161,7 @@ function Library:CreateDropdown(parent, options)
     container.Size = UDim2.new(1, 0, 0, DROP_H + 18)
 
     -- Panel
-    local panelHeight = math.min(#items, maxVisible) * ITEM_H + 8
+    local panelHeight = math.min(#items, maxVisible) * 28 + 12
 
     local panelWrap = Create("Frame", {
         Size = UDim2.new(1, 0, 0, panelHeight + SEARCH_H),
@@ -1204,7 +1204,7 @@ function Library:CreateDropdown(parent, options)
         BackgroundTransparency = 1,
         BorderSizePixel = 0, ScrollBarThickness = 3,
         ScrollBarImageColor3 = self.Theme.Accent,
-        CanvasSize = UDim2.new(0, 0, 0, #items * ITEM_H + 4),
+        CanvasSize = UDim2.new(0, 0, 0, #items * 28 + 8),
         ZIndex = 51, Parent = panelWrap
     }, {
         Create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 6) }),
@@ -1240,8 +1240,8 @@ function Library:CreateDropdown(parent, options)
             if entry.Btn then entry.Btn:Destroy() end
         end
         itemEntries = {}
-        panel.CanvasSize = UDim2.new(0, 0, 0, #list * ITEM_H + 4)
-        local ph = math.min(#list, maxVisible) * ITEM_H + 8
+        panel.CanvasSize = UDim2.new(0, 0, 0, #list * 28 + 8)
+        local ph = math.min(#list, maxVisible) * 28 + 12
         if panelWrap.Parent == self._mainWindow then
             local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
             panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, ph + SEARCH_H)

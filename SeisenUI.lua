@@ -1253,9 +1253,9 @@ function Library:CreateDropdown(parent, options)
                 dropObj:SetValue(opt)
             end)
         end
-        local h = math.min(#opts * 22 + 10, 150)
+        local h = math.min(#opts * 24 + 12, 180)
         list.Size = UDim2.new(1, 0, 0, h)
-        list.CanvasSize = UDim2.new(0, 0, 0, #opts * 22 + 10)
+        list.CanvasSize = UDim2.new(0, 0, 0, #opts * 24 + 6)
     end
     populate()
     function dropObj:Refresh(newOptions, keepCurrent)
