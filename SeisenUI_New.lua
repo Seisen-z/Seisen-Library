@@ -6021,7 +6021,20 @@ function Library:_BuildConfigTab(window)
                     if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir - Vector3.new(0, 1, 0) end
                     flyVel.Velocity = dir * flySpeed
                     if flyGyro and flyGyro.Parent then
-                        flyGyro.CFrame = CFrame.new(Vector3.zero, cam.CFrame.LookVector * Vector3.new(1, 0, 1))
+                        -- Looking close to straight up/down collapses this
+                        -- flattened vector to near-zero, which previously
+                        -- fed CFrame.new(zero, zero) — a degenerate lookAt
+                        -- call (identical position and target) that
+                        -- produces an undefined/NaN rotation. BodyGyro then
+                        -- applies that NaN as its torque target, which is a
+                        -- textbook cause of a violent, uncontrolled fling.
+                        -- Skip the update for that frame instead — keeping
+                        -- the last valid facing is harmless and avoids ever
+                        -- constructing a degenerate CFrame.
+                        local flatLook = cam.CFrame.LookVector * Vector3.new(1, 0, 1)
+                        if flatLook.Magnitude > 0.05 then
+                            flyGyro.CFrame = CFrame.new(Vector3.zero, flatLook)
+                        end
                     end
                     task.wait()
                 end
@@ -7444,6 +7457,21 @@ function Library:_BuildManagersTab(window, folderName)
         ThemeCreator_Background=true, ThemeCreator_Content=true,
         ThemeCreator_Border=true, ThemeCreator_Text=true,
         ThemeCreator_ToggleOff=true, ThemeCreator_Name=true,
+        -- Toggle:SetValue() always invokes the toggle's real Callback (see
+        -- CreateToggle above), and LoadConfig/autoload restores every saved
+        -- toggle via SetValue — so a physically-affecting toggle that was
+        -- ever left on gets silently re-armed on every future script
+        -- execution, before the player does anything. For Fly that means an
+        -- instant high-force BodyVelocity/BodyGyro plus character-wide
+        -- CanCollide=false; for WalkSpeed/JumpPower it means an instant,
+        -- unexplained stat change. These are per-session conveniences, not
+        -- state that should persist silently, so they're excluded from
+        -- being saved/restored at all — they always start off, exactly
+        -- like a fresh session, no matter what they were left at before.
+        BuiltIn_Fly=true, BuiltIn_FlySpeed=true, BuiltIn_NoClip=true,
+        BuiltIn_WalkSpeedToggle=true, BuiltIn_WalkSpeed=true,
+        BuiltIn_JumpPowerToggle=true, BuiltIn_JumpPower=true,
+        BuiltIn_InfiniteJump=true,
     }
 
     local function RefreshConfigList()
