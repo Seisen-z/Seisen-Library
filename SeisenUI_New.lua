@@ -1230,6 +1230,10 @@ function Library:CreateDropdown(parent, options)
                 entry.Lbl.TextColor3 = isSel and self.Theme.Accent or self.Theme.Text
                 if entry.Check then
                     entry.Check.Visible = isSel and true or false
+                    entry.Check.TextColor3 = Color3.fromRGB(15, 15, 20)
+                end
+                if entry.CkFrame then
+                    entry.CkFrame.BackgroundColor3 = isSel and self.Theme.Accent or self.Theme.Element
                 end
             end
         end
@@ -1286,10 +1290,11 @@ function Library:CreateDropdown(parent, options)
                     TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 53, Parent = btn
                 })
                 local checkLabel = nil
+                local ckFrame = nil
                 if isMulti then
-                    local ckFrame = Create("Frame", {
+                    ckFrame = Create("Frame", {
                         Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -20, 0.5, -7),
-                        BackgroundColor3 = isSelected and self.Theme.Accent or self.Theme.InputBg,
+                        BackgroundColor3 = isSelected and self.Theme.Accent or self.Theme.Element,
                         ZIndex = 53, Parent = btn
                     }, {
                         Create("UICorner", { CornerRadius = UDim.new(0, 4) }),
@@ -1297,7 +1302,7 @@ function Library:CreateDropdown(parent, options)
                     })
                     checkLabel = Create("TextLabel", {
                         Size = UDim2.new(1,0,1,0), BackgroundTransparency = 1,
-                        Text = "✓", TextColor3 = Color3.new(1,1,1), Font = Enum.Font.GothamBold, TextSize = 10, ZIndex = 54,
+                        Text = "✓", TextColor3 = Color3.fromRGB(15, 15, 20), Font = Enum.Font.GothamBold, TextSize = 10, ZIndex = 54,
                         Visible = isSelected and true or false, Parent = ckFrame
                     })
                 end
@@ -1321,7 +1326,7 @@ function Library:CreateDropdown(parent, options)
                     callback(value)
                 end)
 
-                table.insert(itemEntries, { Btn = btn, Lbl = lbl, Check = checkLabel, Item = item, ItemStr = itemStr, IsDivider = false })
+                table.insert(itemEntries, { Btn = btn, Lbl = lbl, CkFrame = ckFrame, Check = checkLabel, Item = item, ItemStr = itemStr, IsDivider = false })
             end
         end
     end
