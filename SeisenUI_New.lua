@@ -3089,6 +3089,7 @@ function Library:CreateTabbox(parent, options)
 
     local tabFrames  = {}
     local tabButtons = {}
+    local tabOrder   = {}
     local activeTab  = nil
 
     local function activateTab(name)
@@ -3106,11 +3107,25 @@ function Library:CreateTabbox(parent, options)
         if flag then self.Options[flag] = { Value = name } end
     end
 
-    local n = math.max(#tabs, 1)
-    for i, tabName in ipairs(tabs) do
+    local function relayoutTabs()
+        local n = math.max(#tabOrder, 1)
+        for i, tabName in ipairs(tabOrder) do
+            local btn = tabButtons[tabName]
+            if btn then
+                btn.Size     = UDim2.new(1/n, -2, 1, -4)
+                btn.Position = UDim2.new((i-1)/n, 1, 0, 2)
+            end
+        end
+    end
+
+    -- Builds (or returns the existing) tab button + content frame for tabName.
+    -- Used both for the initial `options.Tabs` list and for tabs added later
+    -- via :AddTab, so a tabbox is never limited to the set it was created with.
+    local function buildTab(tabName)
+        if tabFrames[tabName] then return tabFrames[tabName] end
         local btn = Create("TextButton", {
-            Size     = UDim2.new(1/n, -2, 1, -4),
-            Position = UDim2.new((i-1)/n, 1, 0, 2),
+            Size     = UDim2.new(1, -2, 1, -4),
+            Position = UDim2.new(0, 1, 0, 2),
             BackgroundTransparency = 1,
             BackgroundColor3 = self.Theme.Accent,
             Text = "",
@@ -3141,7 +3156,14 @@ function Library:CreateTabbox(parent, options)
         })
         tabFrames[tabName]  = content
         tabButtons[tabName] = btn
+        table.insert(tabOrder, tabName)
         btn.MouseButton1Click:Connect(function() activateTab(tabName) end)
+        relayoutTabs()
+        return content
+    end
+
+    for _, tabName in ipairs(tabs) do
+        buildTab(tabName)
     end
 
     activateTab(default or tabs[1])
@@ -3150,6 +3172,14 @@ function Library:CreateTabbox(parent, options)
         ActiveTab = activeTab, Tabs = tabFrames,
         GetTab  = function(s, name) return tabFrames[name] end,
         SetTab  = function(s, name) activateTab(name) end,
+        -- Adds a new tab after the tabbox has already been created (e.g. a
+        -- gamemode/category discovered live that didn't exist at load time).
+        -- Returns the tab's content frame; pass activate=true to switch to it.
+        AddTab  = function(s, tabName, activate)
+            local content = buildTab(tabName)
+            if activate then activateTab(tabName) end
+            return content
+        end,
     }
     if flag then self.Options[flag] = tbObj end
     return tbObj
