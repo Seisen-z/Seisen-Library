@@ -49,6 +49,7 @@ local Library = {
     IsMobile = false,
     IsNew = true,
     NotificationsEnabled = true,
+    CounterServerUrl = "http://78.154.103.34:10981/ping",
 }
 
 -- ── Keybind panel row ────────────────────────────────────────────
@@ -8209,11 +8210,38 @@ function Library:_BuildSuggestionsTab(window)
     })
 end
 
+function Library:RecordExecution(options)
+    task.spawn(function()
+        pcall(function()
+            local serverUrl = (options and options.CounterUrl) or self.CounterServerUrl
+            if not serverUrl or serverUrl == "" then return end
+
+            local reqFn = syn and syn.request or http and http.request or request or http_request
+            if not reqFn then return end
+
+            local HS = game:GetService("HttpService")
+            reqFn({
+                Url = serverUrl,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HS:JSONEncode({
+                    Name     = options and options.Name or "Seisen Hub",
+                    SubTitle = options and options.SubTitle or "",
+                    Version  = options and options.Version or "",
+                    PlaceId  = game.PlaceId,
+                    JobId    = game.JobId,
+                })
+            })
+        end)
+    end)
+end
+
 -- ── Final wiring: patch CreateWindow to attach config tab + manager + version check ─────────
 do
     local _orig = Library.CreateWindow
     Library.CreateWindow = function(self, options)
         local win = _orig(self, options)
+        pcall(function() self:RecordExecution(options) end)
         -- Build the keybind panel synchronously so elements can register keybinds
         self:BuildKeybindPanel()
         -- Ensure the divider above built-in tabs is placed once
