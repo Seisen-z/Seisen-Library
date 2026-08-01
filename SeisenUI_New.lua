@@ -3424,35 +3424,85 @@ function Library:CreateWindow(options)
     local function clSetEnabled(v)
         pcall(writefile, CLPREF_PATH, v and "true" or "false")
     end
-    local INTROPREF_PATH = "SeisenHub_" .. folderName .. "_intro.txt"
+    -- Skip-intro pref lives inside the Manager's folder (guaranteed writable).
+    -- Legacy: old scripts wrote to the workspace root, so we check both locations.
+    local saveDir2       = "Seisen/Saved/" .. folderName
+    local INTROPREF_PATH = saveDir2 .. "/.skip_intro"
+    local INTROPREF_OLD  = "SeisenHub_" .. folderName .. "_intro.txt"
+
     local function introEnabled()
-        local ok, v = pcall(readfile, INTROPREF_PATH)
-        if ok and v == "false" then return false end
-        -- Read Manager's saved autoload config JSON directly so Skip Intro works
-        -- the moment the user saves a config with it enabled — no timing dependency.
-        local saveDir2 = "Seisen/Saved/" .. folderName
+        -- 1. Fast path: dedicated flag file in Manager folder (new location)
+        local ok1, v1 = pcall(readfile, INTROPREF_PATH)
+        if ok1 and v1 == "false" then return false end
+        -- 2. Backwards compat: old root-level file (written by previous versions)
+        local ok2, v2 = pcall(readfile, INTROPREF_OLD)
+        if ok2 and v2 == "false" then return false end
+
+        -- 3. Scan EVERY saved config JSON for BuiltIn_SkipIntro=true.
+        --    This works whether or not the user set up an autoload pointer —
+        --    any saved config with Skip Intro enabled will be respected.
         local HS = game:GetService("HttpService")
-        local function checkJson(txt)
-            local o1, nm = pcall(readfile, saveDir2 .. "/" .. txt)
-            if not o1 or not nm or nm == "" then return nil end
-            nm = nm:match("^%s*(.-)%s*$")
-            local o2, raw = pcall(readfile, saveDir2 .. "/" .. nm .. ".json")
-            if not o2 or not raw then return nil end
-            local o3, dec = pcall(function() return HS:JSONDecode(raw) end)
-            if not o3 or type(dec) ~= "table" then return nil end
+        local function jsonHasSkipIntro(raw)
+            local ok, dec = pcall(function() return HS:JSONDecode(raw) end)
+            if not ok or type(dec) ~= "table" then return false end
             for _, e in pairs(dec.objects or {}) do
                 if e.idx == "BuiltIn_SkipIntro" and e.value == true then return true end
             end
             return false
         end
+
+        -- 3a. Check whichever config the autoload pointer references (fastest hit)
+        local function checkAutoloadPtr(ptrFile)
+            local o1, nm = pcall(readfile, saveDir2 .. "/" .. ptrFile)
+            if not o1 or not nm or nm == "" then return nil end
+            nm = nm:match("^%s*(.-)%s*$")
+            local o2, raw = pcall(readfile, saveDir2 .. "/" .. nm .. ".json")
+            if not o2 or not raw or raw == "" then return nil end
+            return jsonHasSkipIntro(raw) and true or false
+        end
         local uid = tostring(Players.LocalPlayer.UserId)
-        local r = checkJson("autoload_" .. uid .. ".txt")
-        if r == nil then r = checkJson("autoload.txt") end
+        local r = checkAutoloadPtr("autoload_" .. uid .. ".txt")
+        if r == nil then r = checkAutoloadPtr("autoload.txt") end
         if r == true then return false end
+
+        local foundSkip = false
+        pcall(function()
+            if not listfiles then return end
+            for _, fpath in ipairs(listfiles(saveDir2)) do
+                if fpath:sub(-5) == ".json" then
+                    local o, raw = pcall(readfile, fpath)
+                    if o and raw and raw ~= "" and jsonHasSkipIntro(raw) then
+                        foundSkip = true
+                        -- Cache result in the flag file so next run is instant
+                        pcall(function()
+                            pcall(makefolder, "Seisen")
+                            pcall(makefolder, "Seisen/Saved")
+                            pcall(makefolder, saveDir2)
+                            pcall(writefile, INTROPREF_PATH, "false")
+                        end)
+                        break
+                    end
+                end
+            end
+        end)
+        if foundSkip then return false end
+        -- Re-check flag file after the scan (may have been written above)
+        local ok3, v3 = pcall(readfile, INTROPREF_PATH)
+        if ok3 and v3 == "false" then return false end
+
         return true
     end
+
     local function introSetEnabled(v)
+        -- Ensure folder path exists before writing (Xeno/Solara require it)
+        pcall(function()
+            pcall(makefolder, "Seisen")
+            pcall(makefolder, "Seisen/Saved")
+            pcall(makefolder, saveDir2)
+        end)
         pcall(writefile, INTROPREF_PATH, v and "true" or "false")
+        -- Also write legacy location for backward compat
+        pcall(writefile, INTROPREF_OLD, v and "true" or "false")
     end
 
     -- ── ScreenGui ────────────────────────────────────────────────
