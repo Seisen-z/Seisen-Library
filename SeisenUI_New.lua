@@ -10,7 +10,7 @@ local Stats            = game:GetService("Stats")
 local LocalPlayer      = Players.LocalPlayer
 
 local IconsLoaded, Icons = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen88/Seisen-Library/main/addons/source.lua"))()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen-z/Seisen-Library/main/addons/source.lua"))()
 end)
 
 local ShortKey
@@ -8389,7 +8389,7 @@ do
         if options and options.ScriptUpdate then
             local localVer = "v1.0.0"
             task.spawn(function()
-                local owner = "Seisen88"
+                local owner = "Seisen-z"
                 local repo = "Seisen-Library"
                 local filePath = "SeisenUI_New.lua"
                 local apiUrl = "https://api.github.com/repos/" .. owner .. "/" .. repo
@@ -8407,7 +8407,7 @@ do
                 -- Fallback to version.txt if no version found in commit message
                 if not remoteVer or remoteVer == "" then
                     local ok2, verData = pcall(function()
-                        return game:HttpGet("https://raw.githubusercontent.com/Seisen88/Seisen-Library/main/version.txt", true)
+                        return game:HttpGet("https://raw.githubusercontent.com/Seisen-z/Seisen-Library/main/version.txt", true)
                     end)
                     if ok2 and verData then
                         remoteVer = verData:match("^%s*(.-)%s*$")
