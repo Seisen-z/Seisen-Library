@@ -4036,9 +4036,12 @@ function Library:CreateWindow(options)
             repeat task.wait(0.08) until keyPassed
         end
 
+        -- Wait one frame so deferred autoload/config restore fires first and writes
+        -- the intro preference file before we read it (task.defer fires before task.wait resumes)
+        if not (options.Key or options.Keys) then task.wait() end
+
         -- Skip intro if the user has disabled the animation
         if not introEnabled() then
-            task.wait()
             pcall(function() splashText:Destroy() end)
             pcall(function() loadScreen:Destroy() end)
             if Window._pendingChangelog and clEnabled() then
