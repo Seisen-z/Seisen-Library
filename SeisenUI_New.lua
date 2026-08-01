@@ -3424,6 +3424,14 @@ function Library:CreateWindow(options)
     local function clSetEnabled(v)
         pcall(writefile, CLPREF_PATH, v and "true" or "false")
     end
+    local INTROPREF_PATH = "SeisenHub_" .. folderName .. "_intro.txt"
+    local function introEnabled()
+        local ok, v = pcall(readfile, INTROPREF_PATH)
+        return not (ok and v == "false")
+    end
+    local function introSetEnabled(v)
+        pcall(writefile, INTROPREF_PATH, v and "true" or "false")
+    end
 
     -- ── ScreenGui ────────────────────────────────────────────────
     local gui = Instance.new("ScreenGui")
@@ -4011,12 +4019,34 @@ function Library:CreateWindow(options)
     -- Declared here so the intro spawn can reference it during Phase 4
     local Window = {}
 
+    local function revealMain()
+        main.Visible = true
+        local tween = TweenService:Create(mainScale, TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Scale = 1 })
+        tween:Play()
+        tween.Completed:Wait()
+        Library.IntroOngoing = false
+        if self._refreshKeybindEmptyHint then self._refreshKeybindEmptyHint() end
+    end
+
     task.spawn(function()
         -- Key System gate (runs before splash if Key/Keys option set)
         if options.Key or options.Keys then
             local keyPassed = false
             self:_ShowKeySystem(options, function() keyPassed = true end)
             repeat task.wait(0.08) until keyPassed
+        end
+
+        -- Skip intro if the user has disabled the animation
+        if not introEnabled() then
+            task.wait()
+            pcall(function() splashText:Destroy() end)
+            pcall(function() loadScreen:Destroy() end)
+            if Window._pendingChangelog and clEnabled() then
+                Window:_renderChangelog(Window._pendingChangelog, revealMain, true)
+            else
+                revealMain()
+            end
+            return
         end
 
         -- Phase 1: typewriter (floating text, no background)
@@ -4118,14 +4148,6 @@ function Library:CreateWindow(options)
         pcall(function() loadScreen:Destroy() end)
 
         -- Phase 4: show changelog first (if pending), then reveal main window
-        local function revealMain()
-            main.Visible = true
-            local tween = TweenService:Create(mainScale, TweenInfo.new(0.4, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), { Scale = 1 })
-            tween:Play()
-            tween.Completed:Wait()
-            Library.IntroOngoing = false
-            if self._refreshKeybindEmptyHint then self._refreshKeybindEmptyHint() end
-        end
         if Window._pendingChangelog and clEnabled() then
             Window:_renderChangelog(Window._pendingChangelog, revealMain, true)
         else
@@ -6668,6 +6690,16 @@ function Library:_BuildConfigTab(window)
         end,
     })
 
+    configRight:AddToggle({
+        Name    = "Skip Intro Animation",
+        Default = not introEnabled(),
+        Flag    = "BuiltIn_SkipIntro",
+        Tooltip = "Skip the loading animation on startup and open the script window immediately.",
+        Callback = function(v)
+            introSetEnabled(not v)
+        end,
+    })
+
     -- UI Settings Section
     local configUI = configTab:AddLeftSection("UI Settings", "settings")
 
@@ -7171,32 +7203,37 @@ function Library:_BuildGamesTab(window)
     right:AddLabel({ Text = "Discontinued games:" })
 
     local GameNameMap = {
-        ["7882829745"] = "Anime Eternal",
-        ["8469926548"] = "Anime Fight",
-        ["9774981774"] = "Anime Re:Ranger X",
-        ["7074860883"] = "Arise Crossover",
-        ["111958650"]  = "Arsenal",
-        ["8220767002"] = "Bee Garden",
-        ["5803093656"] = "Blue Heater 2",
-        ["7541395924"] = "Build an Island",
-        ["8066283370"] = "Build a Zoo",
-        ["8820222330"] = "Dig a Brainrot",
-        ["7468338447"] = "Dig to Earth",
-        ["7546582051"] = "Dungeon Heroes",
-        ["8328640632"] = "Farm It",
-        ["6701277882"] = "Fish It",
-        ["9509842868"] = "Garden Horizon",
-        ["5995470825"] = "Hypershot",
-        ["9529182643"] = "Levelbound",
-        ["8316902627"] = "Plant vs Brainrot",
-        ["8662243497"] = "Raft 101 Survival",
-        ["6867859535"] = "RE:XL",
-        ["7094518649"] = "Restaurant Tycoon 3",
-        ["9792947201"] = "Slime RNG",
-        ["9073775318"] = "Smile Seas",
-        ["9802644580"] = "Summon Heroes",
-        ["4093155512"] = "Swordburst 3",
-        ["7671049560"] = "The Forge",
+        ["10178802449"] = "+1 Mine Per Click",
+        ["7882829745"]  = "Anime Eternal",
+        ["8469926548"]  = "Anime Fight",
+        ["7613921865"]  = "Anime Expeditions",
+        ["9774981774"]  = "Anime Re:Ranger X",
+        ["7074860883"]  = "Arise Crossover",
+        ["111958650"]   = "Arsenal",
+        ["8220767002"]  = "Bee Garden",
+        ["5803093656"]  = "Blue Heater 2",
+        ["7541395924"]  = "Build an Island",
+        ["10265803948"] = "Build a Soccer Squad",
+        ["8066283370"]  = "Build a Zoo",
+        ["8820222330"]  = "Dig a Brainrot",
+        ["7468338447"]  = "Dig to Earth",
+        ["7546582051"]  = "Dungeon Heroes",
+        ["9826885587"]  = "Evomon",
+        ["8328640632"]  = "Farm It",
+        ["6701277882"]  = "Fish It",
+        ["9509842868"]  = "Garden Horizon",
+        ["10200395747"] = "Grow a Garden",
+        ["5995470825"]  = "Hypershot",
+        ["9529182643"]  = "Levelbound",
+        ["8316902627"]  = "Plant vs Brainrot",
+        ["8662243497"]  = "Raft 101 Survival",
+        ["6867859535"]  = "RE:XL",
+        ["7094518649"]  = "Restaurant Tycoon 3",
+        ["9792947201"]  = "Slime RNG",
+        ["9073775318"]  = "Smile Seas",
+        ["9802644580"]  = "Summon Heroes",
+        ["4093155512"]  = "Swordburst 3",
+        ["7671049560"]  = "The Forge",
         ["10039338037"] = "Build a Ring Farm",
         ["10006104044"] = "Wizard Alchemy",
     }
