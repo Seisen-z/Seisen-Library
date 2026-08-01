@@ -28,13 +28,13 @@
 ### Basic Installation
 
 ```lua
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen88/Seisen-Library/main/SeisenUI.lua"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen-z/Seisen-Library/main/SeisenUI.lua"))()
 ```
 
 ### Quick Start Example
 
 ```lua
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen88/Seisen-Library/main/SeisenUI.lua"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen-z/Seisen-Library/main/SeisenUI.lua"))()
 
 -- Create a window
 local Window = Library:CreateWindow({
@@ -76,7 +76,7 @@ Tab:AddSlider({
 
 For a complete feature showcase and all available components, check out:
 
-**[Template.lua](https://github.com/Seisen88/Seisen-Library/blob/main/tests/Template.lua)** - Full feature showcase with all components
+**[Template.lua](https://github.com/Seisen-z/Seisen-Library/blob/main/tests/Template.lua)** - Full feature showcase with all components
 
 ## � Documentation
 
@@ -94,10 +94,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Links
 
-- [GitHub Repository](https://github.com/Seisen88/Seisen-Library)
+- [GitHub Repository](https://github.com/Seisen-z/Seisen-Library)
 - [Documentation](https://seisenui.onrender.com/)
 - [Changelog](CHANGELOG.md)
-- [Report Issues](https://github.com/Seisen88/Seisen-Library/issues)
+- [Report Issues](https://github.com/Seisen-z/Seisen-Library/issues)
 
 ---
 

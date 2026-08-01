@@ -4,7 +4,7 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local IconsLoaded, Icons = pcall(function()
-    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen88/Seisen-Library/main/addons/source.lua"))()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen-z/Seisen-Library/main/addons/source.lua"))()
 end)
 local Library = {
     Toggles = {},
