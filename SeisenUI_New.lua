@@ -3427,7 +3427,29 @@ function Library:CreateWindow(options)
     local INTROPREF_PATH = "SeisenHub_" .. folderName .. "_intro.txt"
     local function introEnabled()
         local ok, v = pcall(readfile, INTROPREF_PATH)
-        return not (ok and v == "false")
+        if ok and v == "false" then return false end
+        -- Read Manager's saved autoload config JSON directly so Skip Intro works
+        -- the moment the user saves a config with it enabled — no timing dependency.
+        local saveDir2 = "Seisen/Saved/" .. folderName
+        local HS = game:GetService("HttpService")
+        local function checkJson(txt)
+            local o1, nm = pcall(readfile, saveDir2 .. "/" .. txt)
+            if not o1 or not nm or nm == "" then return nil end
+            nm = nm:match("^%s*(.-)%s*$")
+            local o2, raw = pcall(readfile, saveDir2 .. "/" .. nm .. ".json")
+            if not o2 or not raw then return nil end
+            local o3, dec = pcall(function() return HS:JSONDecode(raw) end)
+            if not o3 or type(dec) ~= "table" then return nil end
+            for _, e in pairs(dec.objects or {}) do
+                if e.idx == "BuiltIn_SkipIntro" and e.value == true then return true end
+            end
+            return false
+        end
+        local uid = tostring(Players.LocalPlayer.UserId)
+        local r = checkJson("autoload_" .. uid .. ".txt")
+        if r == nil then r = checkJson("autoload.txt") end
+        if r == true then return false end
+        return true
     end
     local function introSetEnabled(v)
         pcall(writefile, INTROPREF_PATH, v and "true" or "false")
@@ -4035,10 +4057,6 @@ function Library:CreateWindow(options)
             self:_ShowKeySystem(options, function() keyPassed = true end)
             repeat task.wait(0.08) until keyPassed
         end
-
-        -- Wait one frame so deferred autoload/config restore fires first and writes
-        -- the intro preference file before we read it (task.defer fires before task.wait resumes)
-        if not (options.Key or options.Keys) then task.wait() end
 
         -- Skip intro if the user has disabled the animation
         if not introEnabled() then
