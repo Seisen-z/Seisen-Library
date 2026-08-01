@@ -4484,8 +4484,10 @@ function Library:CreateWindow(options)
     -- The first entry is treated as the latest (highlighted with accent).
 
     -- Expose pref helpers on Window so _BuildConfigTab can wire the toggle
-    Window._clEnabled    = clEnabled
-    Window._clSetEnabled = clSetEnabled
+    Window._clEnabled       = clEnabled
+    Window._clSetEnabled    = clSetEnabled
+    Window._introEnabled    = introEnabled
+    Window._introSetEnabled = introSetEnabled
 
     -- Store entries and trigger; if called before intro finishes the intro
     -- intercept picks it up. If called after intro, render immediately.
@@ -6692,11 +6694,11 @@ function Library:_BuildConfigTab(window)
 
     configRight:AddToggle({
         Name    = "Skip Intro Animation",
-        Default = not introEnabled(),
+        Default = not window._introEnabled(),
         Flag    = "BuiltIn_SkipIntro",
         Tooltip = "Skip the loading animation on startup and open the script window immediately.",
         Callback = function(v)
-            introSetEnabled(not v)
+            window._introSetEnabled(not v)
         end,
     })
 
