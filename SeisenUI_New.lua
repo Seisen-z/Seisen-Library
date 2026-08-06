@@ -1485,6 +1485,7 @@ function Library:CreateDropdown(parent, options)
         end,
         Refresh = function(s, newList, reset)
             items = newList; allItems = {table.unpack(newList)}
+            panelHeight = math.min(#items, maxVisible) * 28 + 12
             if searchBox then searchBox.Text = "" end
             
             local isValid = false
