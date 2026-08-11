@@ -3405,7 +3405,7 @@ function Library:CreateWindow(options)
     local subtitle     = options.SubTitle or ""
     local scriptName   = options.ScriptName or subtitle or ""
     local version      = options.Version or ""
-    local icon         = (options.Icon and options.Icon ~= "") and options.Icon or "rbxassetid://135035771139684"
+    local icon         = (options.Icon and options.Icon ~= "") and options.Icon or "rbxassetid://108392837079013"
     local keybind      = options.ToggleKeybind or Enum.KeyCode.LeftAlt
     local configUI     = options.ConfigSettings or false
     local managerUI    = options.Manager or false
