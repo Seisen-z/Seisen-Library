@@ -3405,7 +3405,7 @@ function Library:CreateWindow(options)
     local subtitle     = options.SubTitle or ""
     local scriptName   = options.ScriptName or subtitle or ""
     local version      = options.Version or ""
-    local icon         = options.Icon or ""
+    local icon         = (options.Icon and options.Icon ~= "") and options.Icon or "rbxassetid://135035771139684"
     local keybind      = options.ToggleKeybind or Enum.KeyCode.LeftAlt
     local configUI     = options.ConfigSettings or false
     local managerUI    = options.Manager or false
@@ -3643,7 +3643,15 @@ function Library:CreateWindow(options)
         avatarUrl = Players:GetUserThumbnailAsync(lp.UserId, thumbType, thumbSize)
     end)
 
-    -- Rounded avatar frame (ImageButton for privacy toggle)
+    local logoImage = avatarUrl
+    if icon and icon ~= "" then
+        local iconData = self:GetIcon(icon)
+        if iconData and iconData.Url then
+            logoImage = iconData.Url
+        end
+    end
+
+    -- Rounded avatar/logo frame (ImageButton for privacy toggle)
     local nameHidden = false
     local realNameStr = lp.DisplayName
     local realUserStr = "@" .. lp.Name
@@ -3651,7 +3659,7 @@ function Library:CreateWindow(options)
         Size = UDim2.new(0, 32, 0, 32),
         Position = UDim2.new(0, 10, 0.5, -16),
         BackgroundColor3 = self.Theme.InputBg,
-        Image = avatarUrl,
+        Image = logoImage,
         AutoButtonColor = false,
         Parent = sideHeader
     }, {
