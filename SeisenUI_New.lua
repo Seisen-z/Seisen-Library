@@ -7615,9 +7615,9 @@ function Library:_BuildManagersTab(window, folderName)
         -- state that should persist silently, so they're excluded from
         -- being saved/restored at all — they always start off, exactly
         -- like a fresh session, no matter what they were left at before.
-        BuiltIn_Fly=true, BuiltIn_FlySpeed=true, BuiltIn_NoClip=true,
-        BuiltIn_WalkSpeedToggle=true, BuiltIn_WalkSpeed=true,
-        BuiltIn_JumpPowerToggle=true, BuiltIn_JumpPower=true,
+        BuiltIn_Fly=true, BuiltIn_NoClip=true,
+        BuiltIn_WalkSpeedToggle=true,
+        BuiltIn_JumpPowerToggle=true,
         BuiltIn_InfiniteJump=true,
     }
 
