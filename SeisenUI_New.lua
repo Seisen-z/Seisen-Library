@@ -1162,7 +1162,7 @@ function Library:CreateDropdown(parent, options)
     container.Size = UDim2.new(1, 0, 0, DROP_H + 18)
 
     -- Panel
-    local panelHeight = math.min(#items, maxVisible) * 28 + 12
+    local panelHeight = math.min(#items, maxVisible) * ITEM_H + 8
 
     local panelWrap = Create("Frame", {
         Size = UDim2.new(1, 0, 0, panelHeight + SEARCH_H),
@@ -1205,7 +1205,7 @@ function Library:CreateDropdown(parent, options)
         BackgroundTransparency = 1,
         BorderSizePixel = 0, ScrollBarThickness = 3,
         ScrollBarImageColor3 = self.Theme.Accent,
-        CanvasSize = UDim2.new(0, 0, 0, #items * 28 + 8),
+        CanvasSize = UDim2.new(0, 0, 0, #items * ITEM_H + 4),
         ZIndex = 51, Parent = panelWrap
     }, {
         Create("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 6) }),
@@ -1245,8 +1245,8 @@ function Library:CreateDropdown(parent, options)
             if entry.Btn then entry.Btn:Destroy() end
         end
         itemEntries = {}
-        panel.CanvasSize = UDim2.new(0, 0, 0, #list * 28 + 8)
-        local ph = math.min(#list, maxVisible) * 28 + 12
+        panel.CanvasSize = UDim2.new(0, 0, 0, #list * ITEM_H + 4)
+        local ph = math.min(#list, maxVisible) * ITEM_H + 8
         if panelWrap.Parent == self._mainWindow then
             local scale = self._windowScale and self._windowScale.Scale or (self._mainWindowScale and self._mainWindowScale.Scale or 1)
             panelWrap.Size = UDim2.new(0, field.AbsoluteSize.X / scale, 0, ph + SEARCH_H)
@@ -1485,7 +1485,7 @@ function Library:CreateDropdown(parent, options)
         end,
         Refresh = function(s, newList, reset)
             items = newList; allItems = {table.unpack(newList)}
-            panelHeight = math.min(#items, maxVisible) * 28 + 12
+            panelHeight = math.min(#items, maxVisible) * ITEM_H + 8
             if searchBox then searchBox.Text = "" end
             
             local isValid = false
@@ -3570,12 +3570,23 @@ function Library:CreateWindow(options)
     end)
 
     -- ── Notification container ───────────────────────────────────
+    -- Lives in its own always-enabled ScreenGui so toggling the main window
+    -- (LeftAlt / Library:Toggle) never hides in-flight notifications.
+    local notifGui = Instance.new("ScreenGui")
+    notifGui.Name           = "SeisenHubNotify"
+    notifGui.ResetOnSpawn   = false
+    notifGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    notifGui.DisplayOrder   = gui.DisplayOrder + 1
+    notifGui.IgnoreGuiInset = true
+    pcall(function() notifGui.Parent = game:GetService("CoreGui") end)
+    if not notifGui.Parent then notifGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
     local notifContainer = Create("Frame", {
         Name = "NotificationContainer",
         Size = UDim2.new(0, 300, 1, 0),
         Position = UDim2.new(1, -310, 0, 0),
         BackgroundTransparency = 1,
-        Parent = gui
+        Parent = notifGui
     }, { Create("UIListLayout", {
         SortOrder = Enum.SortOrder.LayoutOrder,
         VerticalAlignment = Enum.VerticalAlignment.Bottom,
@@ -6063,6 +6074,7 @@ function Library:_BuildConfigTab(window)
     local flySpeed = 50
     local flyCollisions = {}
     local flyCollisionConn = nil
+    local flySteppedConn = nil
 
     local function stopFly()
         flying = false
@@ -6080,6 +6092,10 @@ function Library:_BuildConfigTab(window)
         if flyCollisionConn then
             flyCollisionConn:Disconnect()
             flyCollisionConn = nil
+        end
+        if flySteppedConn then
+            flySteppedConn:Disconnect()
+            flySteppedConn = nil
         end
         for part, original in pairs(flyCollisions) do
             if part and part.Parent then
@@ -6144,8 +6160,25 @@ function Library:_BuildConfigTab(window)
             if flyCollisionConn then flyCollisionConn:Disconnect() end
             flyCollisionConn = char.DescendantAdded:Connect(function(part)
                 if flying and part:IsA("BasePart") then
-                    flyCollisions[part] = part.CanCollide
+                    if flyCollisions[part] == nil then
+                        flyCollisions[part] = part.CanCollide
+                    end
                     part.CanCollide = false
+                end
+            end)
+
+            if flySteppedConn then flySteppedConn:Disconnect() end
+            flySteppedConn = RunService.Stepped:Connect(function()
+                if not flying then return end
+                local currentChar = LocalPlayer.Character
+                if not currentChar then return end
+                for _, part in ipairs(currentChar:GetDescendants()) do
+                    if part:IsA("BasePart") and part.CanCollide then
+                        if flyCollisions[part] == nil then
+                            flyCollisions[part] = part.CanCollide
+                        end
+                        part.CanCollide = false
+                    end
                 end
             end)
 
@@ -6187,7 +6220,7 @@ function Library:_BuildConfigTab(window)
     configLeft:AddSlider({
         Name = "Fly Speed",
         Min = 10,
-        Max = 200,
+        Max = 500,
         Default = 50,
         Increment = 5,
         Flag = "BuiltIn_FlySpeed",
