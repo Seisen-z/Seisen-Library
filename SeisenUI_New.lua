@@ -4144,13 +4144,13 @@ function Library:CreateWindow(options)
         local fullText = "Seisen Library"
         for i = 1, #fullText do
             splashText.Text = fullText:sub(1, i)
-            task.wait(0.06)
+            task.wait(0.03)
         end
-        task.wait(1)
-        local fadeTween = TweenService:Create(splashText, TweenInfo.new(0.6), { TextTransparency = 1 })
+        task.wait(0.4)
+        local fadeTween = TweenService:Create(splashText, TweenInfo.new(0.3), { TextTransparency = 1 })
         fadeTween:Play(); fadeTween.Completed:Wait()
         splashText:Destroy()
-        task.wait(0.2)
+        task.wait(0.1)
 
         -- Phase 1.5: executor compatibility warning -- bordered card, same
         -- construction as the loading card below (background + corner + stroke),
@@ -4196,46 +4196,46 @@ function Library:CreateWindow(options)
         })
 
         local wStroke = warningCard:FindFirstChildWhichIsA("UIStroke")
-        Tween(warningCard, { BackgroundTransparency = 0.06 }, 0.35)
-        if wStroke then Tween(wStroke, { Transparency = 0.15 }, 0.35) end
-        Tween(warningIcon,  { ImageTransparency = 0 }, 0.35)
-        Tween(warningTitle, { TextTransparency = 0 }, 0.35)
-        Tween(warningBody,  { TextTransparency = 0 }, 0.35)
-        task.wait(1.6)
-        Tween(warningCard, { BackgroundTransparency = 1 }, 0.35)
-        if wStroke then Tween(wStroke, { Transparency = 1 }, 0.35) end
-        Tween(warningIcon,  { ImageTransparency = 1 }, 0.35)
-        Tween(warningTitle, { TextTransparency = 1 }, 0.35)
-        Tween(warningBody,  { TextTransparency = 1 }, 0.35)
-        task.wait(0.4)
+        Tween(warningCard, { BackgroundTransparency = 0.06 }, 0.2)
+        if wStroke then Tween(wStroke, { Transparency = 0.15 }, 0.2) end
+        Tween(warningIcon,  { ImageTransparency = 0 }, 0.2)
+        Tween(warningTitle, { TextTransparency = 0 }, 0.2)
+        Tween(warningBody,  { TextTransparency = 0 }, 0.2)
+        task.wait(0.9)
+        Tween(warningCard, { BackgroundTransparency = 1 }, 0.2)
+        if wStroke then Tween(wStroke, { Transparency = 1 }, 0.2) end
+        Tween(warningIcon,  { ImageTransparency = 1 }, 0.2)
+        Tween(warningTitle, { TextTransparency = 1 }, 0.2)
+        Tween(warningBody,  { TextTransparency = 1 }, 0.2)
+        task.wait(0.25)
         pcall(function() warningCard:Destroy() end)
-        task.wait(0.2)
+        task.wait(0.1)
 
         -- Loading card fade-in
         local stroke = loadScreen:FindFirstChildWhichIsA("UIStroke")
-        Tween(loadScreen, { BackgroundTransparency = 0.06 }, 0.35)
-        if stroke then Tween(stroke, { Transparency = 0.25 }, 0.35) end
-        Tween(loadTitle,  { TextTransparency = 0 }, 0.35)
-        Tween(loadSub,    { TextTransparency = 0 }, 0.35)
-        Tween(loadStatus, { TextTransparency = 0 }, 0.35)
-        Tween(loadWater,  { TextTransparency = 0 }, 0.35)
-        task.wait(0.5)
+        Tween(loadScreen, { BackgroundTransparency = 0.06 }, 0.2)
+        if stroke then Tween(stroke, { Transparency = 0.25 }, 0.2) end
+        Tween(loadTitle,  { TextTransparency = 0 }, 0.2)
+        Tween(loadSub,    { TextTransparency = 0 }, 0.2)
+        Tween(loadStatus, { TextTransparency = 0 }, 0.2)
+        Tween(loadWater,  { TextTransparency = 0 }, 0.2)
+        task.wait(0.25)
 
         loadStatus.Text = "Loading Assets..."
-        task.wait(0.55)
+        task.wait(0.3)
         loadStatus.Text = "Initializing UI..."
-        task.wait(0.55)
+        task.wait(0.3)
         loadStatus.Text = "Complete!"
-        task.wait(0.45)
+        task.wait(0.25)
 
         -- Phase 3: fade out loading card
-        Tween(loadScreen, { BackgroundTransparency = 1 }, 0.35)
-        if stroke then Tween(stroke, { Transparency = 1 }, 0.35) end
-        Tween(loadTitle,  { TextTransparency = 1 }, 0.35)
-        Tween(loadSub,    { TextTransparency = 1 }, 0.35)
-        Tween(loadStatus, { TextTransparency = 1 }, 0.35)
-        Tween(loadWater,  { TextTransparency = 1 }, 0.35)
-        task.wait(0.4)
+        Tween(loadScreen, { BackgroundTransparency = 1 }, 0.2)
+        if stroke then Tween(stroke, { Transparency = 1 }, 0.2) end
+        Tween(loadTitle,  { TextTransparency = 1 }, 0.2)
+        Tween(loadSub,    { TextTransparency = 1 }, 0.2)
+        Tween(loadStatus, { TextTransparency = 1 }, 0.2)
+        Tween(loadWater,  { TextTransparency = 1 }, 0.2)
+        task.wait(0.25)
         pcall(function() loadScreen:Destroy() end)
 
         -- Phase 4: show changelog first (if pending), then reveal main window
