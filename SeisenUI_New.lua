@@ -216,14 +216,24 @@ function Library:SaveConfig(name)
         end
         return "{" .. table.concat(parts, ",") .. "}"
     end)
-    if ok then pcall(writefile, "SeisenConfig_" .. name .. ".json", encoded) end
+    if ok then
+        pcall(function()
+            pcall(makefolder, "Seisen")
+            pcall(makefolder, "Seisen/Saved")
+            writefile("Seisen/Saved/SeisenConfig_" .. name .. ".json", encoded)
+        end)
+    end
 end
 
 function Library:LoadConfig(name)
     if not readfile then return end
     name = name or "default"
-    local path = "SeisenConfig_" .. name .. ".json"
+    local path = "Seisen/Saved/SeisenConfig_" .. name .. ".json"
     local ok, raw = pcall(readfile, path)
+    if not ok or not raw or raw == "" then
+        path = "SeisenConfig_" .. name .. ".json"
+        ok, raw = pcall(readfile, path)
+    end
     if not ok or not raw or raw == "" then return end
     local function parseVal(s)
         s = s:match("^%s*(.-)%s*$")
@@ -2596,7 +2606,14 @@ function Library:_ShowKeySystem(options, onSuccess)
     -- try saved key first
     if saveFile then
         pcall(function()
-            local saved = readfile and readfile("SeisenKey.txt") or ""
+            local saved = ""
+            local ok, s = pcall(readfile, "Seisen/SeisenKey.txt")
+            if ok and s and s ~= "" then
+                saved = s
+            else
+                local ok2, s2 = pcall(readfile, "SeisenKey.txt")
+                if ok2 and s2 and s2 ~= "" then saved = s2 end
+            end
             if validKeys[saved:upper():gsub("%s", "")] then
                 task.defer(onSuccess); return
             end
@@ -2691,7 +2708,14 @@ function Library:_ShowKeySystem(options, onSuccess)
             statusLbl.Text = ""
             Tween(overlay, { BackgroundTransparency = 1 }, 0.25)
             task.delay(0.28, function() pcall(function() overlay:Destroy() end) end)
-            if saveFile then pcall(function() if writefile then writefile("SeisenKey.txt", keyInput.Text) end end) end
+            if saveFile then
+                pcall(function()
+                    if writefile then
+                        pcall(makefolder, "Seisen")
+                        writefile("Seisen/SeisenKey.txt", keyInput.Text)
+                    end
+                end)
+            end
             onSuccess()
         else
             statusLbl.Text = "Invalid key — please try again."
@@ -3415,15 +3439,21 @@ function Library:CreateWindow(options)
     self.ToggleKeybind = keybind
     self._windowVersion = version
 
-    -- ── Changelog pref (persisted via writefile/readfile) ────────
-    -- Flat file in executor workspace — no folder creation needed for max compatibility
-    local CLPREF_PATH = "SeisenHub_" .. folderName .. "_cl.txt"
+    -- ── Changelog pref (persisted via writefile/readfile under Seisen) ────────
+    local CLPREF_PATH = "Seisen/Changelog_" .. folderName .. ".txt"
+    local CLPREF_OLD  = "SeisenHub_" .. folderName .. "_cl.txt"
     local function clEnabled()
         local ok, v = pcall(readfile, CLPREF_PATH)
+        if not ok or v == nil then
+            ok, v = pcall(readfile, CLPREF_OLD)
+        end
         return not (ok and v == "false")
     end
     local function clSetEnabled(v)
-        pcall(writefile, CLPREF_PATH, v and "true" or "false")
+        pcall(function()
+            pcall(makefolder, "Seisen")
+            writefile(CLPREF_PATH, v and "true" or "false")
+        end)
     end
     -- Skip-intro pref lives inside the Manager's folder (guaranteed writable).
     -- Legacy: old scripts wrote to the workspace root, so we check both locations.
