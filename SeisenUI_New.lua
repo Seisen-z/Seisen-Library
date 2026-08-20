@@ -1586,6 +1586,104 @@ function Library:CreateTextbox(parent, options)
     return boxObj
 end
 
+function Library:CreateDualTextbox(parent, options1, options2)
+    local boxName1     = options1.Name or "Textbox 1"
+    local placeholder1 = options1.Placeholder or ""
+    local default1     = options1.Default or ""
+    local callback1    = options1.Callback or function() end
+    local flag1        = options1.Flag
+    local clearOnFocus1 = options1.ClearTextOnFocus ~= false
+
+    local boxName2     = options2.Name or "Textbox 2"
+    local placeholder2 = options2.Placeholder or ""
+    local default2     = options2.Default or ""
+    local callback2    = options2.Callback or function() end
+    local flag2        = options2.Flag
+    local clearOnFocus2 = options2.ClearTextOnFocus ~= false
+    
+    local sharedLabel  = options1.Label or "Dual Textbox"
+
+    local container = Create("Frame", {
+        Size = UDim2.new(1, 0, 0, 42), BackgroundTransparency = 1, Parent = parent
+    })
+    Create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 14), BackgroundTransparency = 1,
+        Text = sharedLabel, TextColor3 = self.Theme.TextDim,
+        Font = Enum.Font.Gotham, TextSize = 10,
+        TextXAlignment = Enum.TextXAlignment.Left, Parent = container
+    })
+
+    local leftField = Create("Frame", {
+        Size = UDim2.new(0.5, -4, 0, 26), Position = UDim2.new(0, 0, 0, 16),
+        BackgroundColor3 = self.Theme.InputBg, Parent = container
+    }, { Create("UICorner", { CornerRadius = UDim.new(0, 8) }) })
+
+    local leftStroke = Instance.new("UIStroke")
+    leftStroke.Color = self.Theme.Border; leftStroke.Thickness = 1; leftStroke.Parent = leftField
+    self:RegisterElement(leftField, "InputBg"); self:RegisterElement(leftStroke, "Border", "Color")
+
+    local textbox1 = Create("TextBox", {
+        Size = UDim2.new(1, -10, 1, 0), Position = UDim2.new(0, 8, 0, 0),
+        BackgroundTransparency = 1, Text = default1,
+        PlaceholderText = placeholder1, PlaceholderColor3 = self.Theme.TextMuted,
+        TextColor3 = self.Theme.Text, Font = Enum.Font.Gotham, TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = clearOnFocus1,
+        TextTruncate = Enum.TextTruncate.AtEnd, ClipsDescendants = true,
+        Parent = leftField
+    })
+    self:RegisterElement(textbox1, "Text", "TextColor3")
+
+    textbox1.Focused:Connect(function() Tween(leftStroke, { Color = self.Theme.Accent }) end)
+    textbox1.FocusLost:Connect(function()
+        Tween(leftStroke, { Color = self.Theme.Border })
+        callback1(textbox1.Text)
+    end)
+
+    local boxObj1 = {
+        Value = textbox1.Text, Type = "Input",
+        SetValue = function(s, v) textbox1.Text = v; s.Value = v; callback1(v) end
+    }
+    textbox1:GetPropertyChangedSignal("Text"):Connect(function() boxObj1.Value = textbox1.Text end)
+    self:ApplyCommonProperties(container, options1, boxObj1)
+    if flag1 then self.Options[flag1] = boxObj1 end
+
+    local rightField = Create("Frame", {
+        Size = UDim2.new(0.5, -4, 0, 26), Position = UDim2.new(0.5, 4, 0, 16),
+        BackgroundColor3 = self.Theme.InputBg, Parent = container
+    }, { Create("UICorner", { CornerRadius = UDim.new(0, 8) }) })
+
+    local rightStroke = Instance.new("UIStroke")
+    rightStroke.Color = self.Theme.Border; rightStroke.Thickness = 1; rightStroke.Parent = rightField
+    self:RegisterElement(rightField, "InputBg"); self:RegisterElement(rightStroke, "Border", "Color")
+
+    local textbox2 = Create("TextBox", {
+        Size = UDim2.new(1, -10, 1, 0), Position = UDim2.new(0, 8, 0, 0),
+        BackgroundTransparency = 1, Text = default2,
+        PlaceholderText = placeholder2, PlaceholderColor3 = self.Theme.TextMuted,
+        TextColor3 = self.Theme.Text, Font = Enum.Font.Gotham, TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Left, ClearTextOnFocus = clearOnFocus2,
+        TextTruncate = Enum.TextTruncate.AtEnd, ClipsDescendants = true,
+        Parent = rightField
+    })
+    self:RegisterElement(textbox2, "Text", "TextColor3")
+
+    textbox2.Focused:Connect(function() Tween(rightStroke, { Color = self.Theme.Accent }) end)
+    textbox2.FocusLost:Connect(function()
+        Tween(rightStroke, { Color = self.Theme.Border })
+        callback2(textbox2.Text)
+    end)
+
+    local boxObj2 = {
+        Value = textbox2.Text, Type = "Input",
+        SetValue = function(s, v) textbox2.Text = v; s.Value = v; callback2(v) end
+    }
+    textbox2:GetPropertyChangedSignal("Text"):Connect(function() boxObj2.Value = textbox2.Text end)
+    self:ApplyCommonProperties(container, options2, boxObj2)
+    if flag2 then self.Options[flag2] = boxObj2 end
+
+    return boxObj1, boxObj2
+end
+
 -- ── Checkbox ──────────────────────────────────────────────────────
 -- Distinct from Toggle — square box with a checkmark, no switch
 function Library:CreateCheckbox(parent, options)
@@ -5667,6 +5765,14 @@ function Library:CreateSection(parent, name, iconName)
             AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = nextOrder(), Parent = container
         })
         return Library:CreateTextbox(f, opts)
+    end
+
+    function S:AddDualTextbox(opts1, opts2)
+        local f = Create("Frame", {
+            Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1,
+            AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = nextOrder(), Parent = container
+        })
+        return Library:CreateDualTextbox(f, opts1, opts2)
     end
 
     function S:AddCheckbox(opts)
