@@ -7875,7 +7875,7 @@ function Library:_BuildManagersTab(window, folderName)
                 elseif entry.type=="ColorPicker" then
                     local o=self.Options and self.Options[entry.idx]; if o and o.SetValue then o:SetValue(Color3.fromHex(entry.value)) end
                 elseif entry.type=="Input" then
-                    local o=self.Options and self.Options[entry.idx]; if o and o.SetValue and type(entry.text)=="string" then o:SetValue(entry.text) end
+                    local o=self.Options and self.Options[entry.idx]; if o and o.SetValue and entry.text ~= nil then o:SetValue(tostring(entry.text)) end
                 end
             end) end)
         end
