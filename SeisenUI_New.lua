@@ -3526,15 +3526,23 @@ function Library:Unload()
     end
     self._flyGyro = nil
 
-    -- Reset player stats that sliders may have changed but have no toggle
+    -- Reset player stats that sliders may have changed but have no toggle. The WalkSpeed/JumpPower
+    -- toggles above already restore the game's actual original values when turned off; this is only
+    -- a fallback for whichever of those toggles was never touched this session.
     pcall(function()
         local char = LocalPlayer and LocalPlayer.Character
         if char then
             local hum = char:FindFirstChildOfClass("Humanoid")
             if hum then
-                hum.WalkSpeed = 16
-                hum.UseJumpPower = true
-                hum.JumpPower = 50
+                hum.WalkSpeed = self._originalWalkSpeed or 16
+                if self._originalUseJumpPower ~= nil then
+                    hum.UseJumpPower = self._originalUseJumpPower
+                end
+                if hum.UseJumpPower then
+                    hum.JumpPower = self._originalJumpPower or 50
+                else
+                    hum.JumpHeight = self._originalJumpPower or 7.2
+                end
             end
         end
     end)
@@ -6202,14 +6210,20 @@ function Library:_BuildConfigTab(window)
             pcall(function()
                 if v then
                     if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                        if self._originalWalkSpeed == nil then
+                            self._originalWalkSpeed = LocalPlayer.Character.Humanoid.WalkSpeed
+                        end
                         LocalPlayer.Character.Humanoid.WalkSpeed = walkSpeedValue
                     end
-                    
+
                     if not walkSpeedCharConnection then
                         walkSpeedCharConnection = LocalPlayer.CharacterAdded:Connect(function(char)
                             task.wait(0.5)
                             local hum = char:FindFirstChild("Humanoid")
                             if hum then
+                                if self._originalWalkSpeed == nil then
+                                    self._originalWalkSpeed = hum.WalkSpeed
+                                end
                                 hum.WalkSpeed = walkSpeedValue
                             end
                         end)
@@ -6238,7 +6252,7 @@ function Library:_BuildConfigTab(window)
                         wasActive = true
                     end
                     if wasActive and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                        LocalPlayer.Character.Humanoid.WalkSpeed = 16
+                        LocalPlayer.Character.Humanoid.WalkSpeed = self._originalWalkSpeed or 16
                     end
                 end
             end)
@@ -6281,6 +6295,10 @@ function Library:_BuildConfigTab(window)
                     if char then
                         local hum = char:FindFirstChildOfClass("Humanoid")
                         if hum then
+                            if self._originalJumpPower == nil then
+                                self._originalUseJumpPower = hum.UseJumpPower
+                                self._originalJumpPower = hum.UseJumpPower and hum.JumpPower or hum.JumpHeight
+                            end
                             hum.UseJumpPower = true
                             hum.JumpPower    = jumpPowerValue
                         end
@@ -6290,6 +6308,10 @@ function Library:_BuildConfigTab(window)
                             task.wait(0.5)
                             local hum = char:FindFirstChildOfClass("Humanoid")
                             if hum then
+                                if self._originalJumpPower == nil then
+                                    self._originalUseJumpPower = hum.UseJumpPower
+                                    self._originalJumpPower = hum.UseJumpPower and hum.JumpPower or hum.JumpHeight
+                                end
                                 hum.UseJumpPower = true
                                 hum.JumpPower    = jumpPowerValue
                             end
@@ -6320,8 +6342,14 @@ function Library:_BuildConfigTab(window)
                         if not char then return end
                         local hum = char:FindFirstChildOfClass("Humanoid")
                         if hum then
-                            hum.UseJumpPower = true
-                            hum.JumpPower    = 50
+                            if self._originalUseJumpPower ~= nil then
+                                hum.UseJumpPower = self._originalUseJumpPower
+                            end
+                            if hum.UseJumpPower then
+                                hum.JumpPower = self._originalJumpPower or 50
+                            else
+                                hum.JumpHeight = self._originalJumpPower or 7.2
+                            end
                         end
                     end)
                 end
