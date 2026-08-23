@@ -207,9 +207,20 @@ function Library:SaveConfig(name)
             elseif typeof(v) == "Color3" then
                 vStr = string.format('{"__c3":[%d,%d,%d]}', math.floor(v.R*255), math.floor(v.G*255), math.floor(v.B*255))
             elseif type(v) == "table" then
-                local arr = {}
-                for _, item in ipairs(v) do table.insert(arr, '"' .. tostring(item) .. '"') end
-                vStr = "[" .. table.concat(arr, ",") .. "]"
+                if #v > 0 then
+                    local arr = {}
+                    for _, item in ipairs(v) do table.insert(arr, '"' .. tostring(item):gsub('"', '\\"') .. '"') end
+                    vStr = "[" .. table.concat(arr, ",") .. "]"
+                else
+                    -- Multi-select dropdowns store their selection as {[itemName] = true, ...},
+                    -- a dict with no array part - ipairs() above would silently save it as "[]"
+                    -- and lose the whole selection, so encode true-valued keys as a JSON object.
+                    local objParts = {}
+                    for k2, v2 in pairs(v) do
+                        if v2 then table.insert(objParts, '"' .. tostring(k2):gsub('"', '\\"') .. '":true') end
+                    end
+                    vStr = "{" .. table.concat(objParts, ",") .. "}"
+                end
             else vStr = '"' .. tostring(v) .. '"'
             end
             table.insert(parts, '"' .. k .. '":' .. vStr)
@@ -249,6 +260,11 @@ function Library:LoadConfig(name)
             local arr = {}
             for item in s:gmatch('"([^"]*)"') do table.insert(arr, item) end
             return arr
+        end
+        if s:sub(1,1) == "{" then
+            local dict = {}
+            for k2 in s:gmatch('"([^"]*)":true') do dict[k2] = true end
+            return dict
         end
         return s:match('^"(.*)"$') or s
     end
