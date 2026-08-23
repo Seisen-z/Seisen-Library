@@ -4505,6 +4505,15 @@ function Library:CreateWindow(options)
     tabList    = {}   -- { name, page, sideBtn }
     local activeTab  = nil
     local currentSection = nil
+    -- Every sidebar header and tab button, in visual order, so a tab can be
+    -- moved to a specific position later (e.g. ShowChangelog placing itself
+    -- above Performance) by reordering this list and renumbering LayoutOrder.
+    local sidebarItems = {}
+    local function RenumberSidebar()
+        for i, item in ipairs(sidebarItems) do
+            item.LayoutOrder = i
+        end
+    end
 
     local function switchTab(entry)
         if activeTab then
@@ -4571,6 +4580,7 @@ function Library:CreateWindow(options)
             Text = "", AutoButtonColor = false,
             ZIndex = 3, Parent = secHeader
         })
+        table.insert(sidebarItems, secHeader)
 
         local sectionData = {
             Visible = true,
@@ -4654,6 +4664,7 @@ function Library:CreateWindow(options)
         if currentSection then
             table.insert(currentSection.Tabs, btn)
         end
+        table.insert(sidebarItems, btn)
 
         -- Icon
         local iconImg; do
@@ -4850,18 +4861,49 @@ function Library:CreateWindow(options)
     Window._introEnabled    = introEnabled
     Window._introSetEnabled = introSetEnabled
 
+    -- [Added]/[Fixed]/[Improved] prefixes get color-coded via the paragraph
+    -- body's RichText support instead of sitting as plain text.
+    local CHANGE_TAG_COLORS = { Added = "#57F287", Fixed = "#ED4245", Improved = "#5865F2" }
+    local function FormatChangeLine(text)
+        local tag, rest = tostring(text):match("^%[(%a+)%]%s*(.*)$")
+        if not tag then return text end
+        return "<font color=\"" .. (CHANGE_TAG_COLORS[tag] or "#A0A0B0") .. "\">[" .. tag .. "]</font> " .. rest
+    end
+
     function Window:ShowChangelog(entries)
         if not entries or #entries == 0 or Window._changelogTab then return end
         local tab = Window:AddTab("Changelog", "list", true)
-        local section = tab:AddSection("Version History", "list")
         for i, entry in ipairs(entries) do
-            local title = tostring(entry.Version or "") .. "  ·  " .. tostring(entry.Date or "")
-            if i == 1 then title = title .. "  (Latest)" end
-            section:AddParagraph({
-                Title   = title,
-                Content = table.concat(entry.Changes or {}, "\n"),
-            })
+            local title = tostring(entry.Version or "") .. "  ·  " .. tostring(entry.Date or "") .. (i == 1 and "  (Latest)" or "")
+            local section = tab:AddSection(title, i == 1 and "sparkles" or "clock")
+            local lines = {}
+            for _, change in ipairs(entry.Changes or {}) do
+                table.insert(lines, FormatChangeLine(change))
+            end
+            section:AddParagraph({ Content = table.concat(lines, "\n") })
         end
+
+        -- Slot the tab in right above Performance instead of the very bottom of the
+        -- built-in area, so it isn't buried under Manager/Games/ESP/Suggestions.
+        pcall(function()
+            local changelogBtn = tabList[#tabList] and tabList[#tabList].btn
+            local perfBtn = nil
+            for _, entry in ipairs(tabList) do
+                if entry.name == "Performance" then perfBtn = entry.btn end
+            end
+            if not changelogBtn or not perfBtn then return end
+            local changelogIdx, perfIdx = nil, nil
+            for i, item in ipairs(sidebarItems) do
+                if item == changelogBtn then changelogIdx = i end
+                if item == perfBtn then perfIdx = i end
+            end
+            if changelogIdx and perfIdx and changelogIdx > perfIdx then
+                table.remove(sidebarItems, changelogIdx)
+                table.insert(sidebarItems, perfIdx, changelogBtn)
+                RenumberSidebar()
+            end
+        end)
+
         Window._changelogTab = tab
     end
 
