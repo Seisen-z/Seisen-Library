@@ -6744,8 +6744,12 @@ function Library:_BuildConfigTab(window)
     local autoRejoin = false
     local autoRejoinConn1 = nil
     local autoRejoinConn2 = nil
+    local autoRejoinVisConns = {}
+    local rejoining = false
 
     local function doRejoin()
+        if rejoining then return end
+        rejoining = true
         Library:Notify({
             Title = "Auto-Rejoin",
             Content = "Rejoining in 5 seconds...",
@@ -6766,6 +6770,22 @@ function Library:_BuildConfigTab(window)
         end
     end
 
+    -- ErrorPrompt is a permanent hidden child of promptOverlay, not one that gets
+    -- added/removed per error, so ChildAdded never fires for it. The only real
+    -- signal is its Visible property flipping true when a disconnect/error occurs.
+    local function watchErrorPrompt(prompt)
+        if not prompt or not prompt:IsA("GuiObject") then return end
+        if autoRejoin and prompt.Visible then
+            task.spawn(doRejoin)
+        end
+        local conn = prompt:GetPropertyChangedSignal("Visible"):Connect(function()
+            if autoRejoin and prompt.Visible then
+                task.spawn(doRejoin)
+            end
+        end)
+        table.insert(autoRejoinVisConns, conn)
+    end
+
     configRight:AddToggle({
         Name = "Auto-Rejoin",
         Default = false,
@@ -6774,24 +6794,26 @@ function Library:_BuildConfigTab(window)
         Callback = function(v)
             autoRejoin = v
             if autoRejoin then
+                rejoining = false
                 local CoreGui = game:GetService("CoreGui")
                 local promptOverlay = CoreGui:FindFirstChild("RobloxPromptGui") and CoreGui.RobloxPromptGui:FindFirstChild("promptOverlay")
                 if promptOverlay then
-                    local function check(child)
-                        if autoRejoin and (child.Name == "ErrorPrompt" or child:FindFirstChild("ErrorTitle") or child:FindFirstChild("ErrorMessage")) then
-                            doRejoin()
+                    for _, child in ipairs(promptOverlay:GetChildren()) do
+                        if child.Name == "ErrorPrompt" then
+                            watchErrorPrompt(child)
                         end
                     end
-                    for _, child in ipairs(promptOverlay:GetChildren()) do
-                        check(child)
-                    end
-                    autoRejoinConn1 = promptOverlay.ChildAdded:Connect(check)
+                    autoRejoinConn1 = promptOverlay.ChildAdded:Connect(function(child)
+                        if child.Name == "ErrorPrompt" then
+                            watchErrorPrompt(child)
+                        end
+                    end)
                 end
-                
+
                 local GuiService = game:GetService("GuiService")
                 autoRejoinConn2 = GuiService.ErrorMessageChanged:Connect(function(message)
                     if autoRejoin and message ~= "" then
-                        doRejoin()
+                        task.spawn(doRejoin)
                     end
                 end)
             else
@@ -6803,6 +6825,10 @@ function Library:_BuildConfigTab(window)
                     autoRejoinConn2:Disconnect()
                     autoRejoinConn2 = nil
                 end
+                for _, conn in ipairs(autoRejoinVisConns) do
+                    pcall(function() conn:Disconnect() end)
+                end
+                table.clear(autoRejoinVisConns)
             end
         end
     })
