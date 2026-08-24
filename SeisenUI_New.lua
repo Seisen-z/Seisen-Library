@@ -3581,10 +3581,12 @@ function Library:Unload()
     
     -- Destroy Notification container ScreenGui if it exists
     if self.NotificationContainer then
-        local p = self.NotificationContainer.Parent
-        if p and p:IsA("ScreenGui") then
-            pcall(function() p:Destroy() end)
-        end
+        pcall(function()
+            local p = self.NotificationContainer.Parent
+            if p and p:IsA("ScreenGui") then
+                p:Destroy()
+            end
+        end)
         self.NotificationContainer = nil
     end
 
