@@ -1178,14 +1178,16 @@ function Library:CreateDropdown(parent, options)
     self:ApplyIcon(chevron, "chevron-down")
     self:RegisterElement(chevron, "TextDim", "ImageColor3")
 
-    local nameLabel = Create("TextLabel", {
-        Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 0, DROP_H + 1),
-        BackgroundTransparency = 1, Text = dropName,
-        TextColor3 = self.Theme.TextDim, Font = Enum.Font.Gotham, TextSize = 10,
-        TextXAlignment = Enum.TextXAlignment.Left, Parent = container
-    })
-    self:RegisterElement(nameLabel, "TextDim", "TextColor3")
-    container.Size = UDim2.new(1, 0, 0, DROP_H + 18)
+    if dropName ~= "" then
+        local nameLabel = Create("TextLabel", {
+            Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 0, DROP_H + 1),
+            BackgroundTransparency = 1, Text = dropName,
+            TextColor3 = self.Theme.TextDim, Font = Enum.Font.Gotham, TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left, Parent = container
+        })
+        self:RegisterElement(nameLabel, "TextDim", "TextColor3")
+        container.Size = UDim2.new(1, 0, 0, DROP_H + 18)
+    end
 
     -- Panel
     local panelHeight = math.min(#items, maxVisible) * ITEM_H + 8
@@ -8511,7 +8513,7 @@ do
                     return game:HttpGet(apiUrl, true)
                 end)
                 local commitMsg, firstLine, remoteVer
-                if ok and data and data ~= "" then
+                if ok and type(data) == "string" and data ~= "" then
                     commitMsg = data:match('"message"%s*:%s*"([^"\\]*)') or ""
                     firstLine = commitMsg:match("^([^\n]+)") or commitMsg
                     remoteVer = firstLine:match("v%d+%.%d+[%.%d]*") or firstLine:match("%d+%.%d+[%.%d]*")
@@ -8522,7 +8524,7 @@ do
                     local ok2, verData = pcall(function()
                         return game:HttpGet("https://raw.githubusercontent.com/Seisen-z/Seisen-Library/main/version.txt", true)
                     end)
-                    if ok2 and verData then
+                    if ok2 and type(verData) == "string" and verData ~= "" then
                         remoteVer = verData:match("^%s*(.-)%s*$")
                     end
                 end
