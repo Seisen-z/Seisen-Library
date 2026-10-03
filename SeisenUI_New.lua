@@ -4619,24 +4619,7 @@ function Library:CreateWindow(options)
     tabList    = {}   -- { name, page, sideBtn }
     local activeTab  = nil
     local currentSection = nil
-    -- Every sidebar header and tab button, in visual order, so one can be moved
-    -- to a specific position later (e.g. ShowChangelog placing itself above
-    -- Performance). Built-in items live in a high numeric range (builtInOrder,
-    -- 10000+) and normal tabs in a low one (tabOrder) so they never collide -
-    -- only shift LayoutOrder values within that same range, never renumber the
-    -- whole list to small sequential integers or the two ranges would collapse
-    -- into each other and scramble every tab's position.
     local sidebarItems = {}
-    local function InsertSidebarItemBefore(item, beforeItem)
-        if beforeItem.Parent ~= sideScroll then beforeItem = beforeItem.Parent.Parent end
-        local targetOrder = beforeItem.LayoutOrder
-        for _, other in ipairs(sidebarItems) do
-            if other ~= item and other.LayoutOrder >= targetOrder then
-                other.LayoutOrder = other.LayoutOrder + 1
-            end
-        end
-        item.LayoutOrder = targetOrder
-    end
 
     local function switchTab(entry)
         if activeTab then
@@ -5068,9 +5051,12 @@ function Library:CreateWindow(options)
     function Window:ShowChangelog(entries)
         if not entries or #entries == 0 or Window._changelogTab then return end
         local previousSection = currentSection
-        currentSection = nil
+        for _, section in ipairs(sidebarSections) do
+            if section.Name == "Config" then currentSection = section break end
+        end
         local tab = Window:AddTab("Changelog", "list", true)
         currentSection = previousSection
+        tabList[#tabList].btn.LayoutOrder = 0
         for i, entry in ipairs(entries) do
             local title = tostring(entry.Version or "") .. "  ·  " .. tostring(entry.Date or "") .. (i == 1 and "  (Latest)" or "")
             local section = tab:AddSection(title, i == 1 and "sparkles" or "clock")
@@ -5080,19 +5066,6 @@ function Library:CreateWindow(options)
             end
             section:AddParagraph({ Content = table.concat(lines, "\n") })
         end
-
-        -- Slot the tab in right above Performance instead of the very bottom of the
-        -- built-in area, so it isn't buried under Manager/Games/ESP/Suggestions.
-        pcall(function()
-            local changelogBtn = tabList[#tabList] and tabList[#tabList].btn
-            local perfBtn = nil
-            for _, entry in ipairs(tabList) do
-                if entry.name == "Performance" then perfBtn = entry.btn end
-            end
-            if changelogBtn and perfBtn then
-                InsertSidebarItemBefore(changelogBtn, perfBtn)
-            end
-        end)
 
         Window._changelogTab = tab
     end
