@@ -6104,6 +6104,7 @@ end
 function Library:_BuildConfigTab(window)
     self:_EnsureBuiltInSection(window)
     local configTab = window:AddTab("Performance", "activity", true)
+    local configUI = configTab:AddLeftSection("UI Settings", "settings")
     local configLeft = configTab:AddLeftSection("Character", "person-standing")
     local configRight = configTab:AddRightSection("Misc", "sparkles")
 
@@ -6435,13 +6436,16 @@ function Library:_BuildConfigTab(window)
                     local cam = workspace.CurrentCamera
                     local dir = Vector3.zero
 
-                    local move = Vector3.zero
-                    if flyControls then
+                    if self.IsMobile and flyControls then
                         local okMove, mv = pcall(function() return flyControls:GetMoveVector() end)
-                        if okMove and typeof(mv) == "Vector3" then move = mv end
-                    end
-                    if move.Magnitude > 0.01 then
-                        dir = dir + cam.CFrame.RightVector * move.X - cam.CFrame.LookVector * move.Z
+                        if okMove and typeof(mv) == "Vector3" and mv.Magnitude > 0.01 then
+                            dir = dir + cam.CFrame.RightVector * mv.X - cam.CFrame.LookVector * mv.Z
+                        end
+                    else
+                        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+                        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+                        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+                        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
                     end
 
                     if flyUp or UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
@@ -7073,8 +7077,6 @@ function Library:_BuildConfigTab(window)
     })
 
     -- UI Settings Section
-    local configUI = configTab:AddLeftSection("UI Settings", "settings")
-
     configUI:AddSlider({
         Name = "UI Scale", Min = 50, Max = 150, Default = math.floor((self._baseScale or 1) * 100),
         Increment = 5, Suffix = "%", Flag = "BuiltIn_UIScale",
@@ -7085,7 +7087,7 @@ function Library:_BuildConfigTab(window)
     })
 
     configUI:AddKeybind({
-        Name = "Toggle UI Key", Default = self.ToggleKeybind or Enum.KeyCode.LeftAlt,
+        Name = "Open / Close Key", Default = self.ToggleKeybind or Enum.KeyCode.LeftAlt,
         Flag = "BuiltIn_ToggleKey",
         Tooltip = "Key that shows / hides the UI.",
         Callback = function(k)
