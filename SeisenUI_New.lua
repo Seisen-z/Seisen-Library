@@ -3728,7 +3728,6 @@ end
 function Library:CreateWindow(options)
     local tabList = {}
     local sidebarSections = {}
-    local responsiveColumns = {}
     if _G.SeisenInstance then
         pcall(function()
             _G.SeisenInstance:Unload()
@@ -3854,7 +3853,6 @@ function Library:CreateWindow(options)
     self._windowScale = scale
     self._baseScale = options and options.Scale or 1
 
-    local refreshResponsiveLayout
     local function autoAdjustScale()
         -- Camera viewport is always populated and works on mobile; fall back to gui size
         local vp = gui.AbsoluteSize
@@ -3865,14 +3863,13 @@ function Library:CreateWindow(options)
         end
         if vp.X == 0 or vp.Y == 0 then return end
 
-        if refreshResponsiveLayout then refreshResponsiveLayout(vp) end
-        local WIN_W = self._layoutWidth or (options and options.Width or 680)
-        local WIN_H = self._layoutHeight or (options and options.Height or 480)
+        local WIN_W = options and options.Width or 680
+        local WIN_H = options and options.Height or 480
         local margin = 32
         local scaleX = vp.X / (WIN_W + margin)
         local scaleY = vp.Y / (WIN_H + margin)
         local finalScale = math.min(1, math.min(scaleX, scaleY)) * (self._baseScale or 1)
-        scale.Scale = math.clamp(finalScale, 0.45, 2.0)
+        scale.Scale = math.clamp(finalScale, 0.25, 2.0)
     end
     self._autoAdjustScale = autoAdjustScale
 
@@ -4386,28 +4383,6 @@ function Library:CreateWindow(options)
     table.insert(self.KeybindConnections, resizeConn1)
     table.insert(self.KeybindConnections, resizeConn2)
 
-    refreshResponsiveLayout = function(vp)
-        local narrow = vp.X < 700
-        local w = narrow and math.min(WIN_W, math.max(320, vp.X - 24)) or WIN_W
-        local h = narrow and math.min(WIN_H, math.max(300, vp.Y - 24)) or WIN_H
-        self._layoutWidth, self._layoutHeight = w, h
-        main.Size = UDim2.fromOffset(w, h)
-        main.Position = UDim2.new(0.5, -w / 2, 0.5, -h / 2)
-        sidebar.Size = narrow and UDim2.new(1, 0, 0, 180) or UDim2.new(0, SIDE_W, 1, 0)
-        content.Size = narrow and UDim2.new(1, 0, 1, -180) or UDim2.new(1, -SIDE_W, 1, 0)
-        content.Position = narrow and UDim2.fromOffset(0, 180) or UDim2.fromOffset(SIDE_W, 0)
-        sidebarClip.Visible = not narrow
-        contentClip.Visible = not narrow
-        tagsContainer.Visible = not narrow
-        activeTitle.Size = narrow and UDim2.new(1, -105, 1, 0) or UDim2.new(1, -380, 1, 0)
-        maxBtn.Visible = not narrow
-        resizeHandle.Visible = not narrow
-        for _, columns in ipairs(responsiveColumns) do
-            columns.layout.FillDirection = narrow and Enum.FillDirection.Vertical or Enum.FillDirection.Horizontal
-            columns.left.Size = narrow and UDim2.new(1, 0, 0, 0) or UDim2.new(0.5, -4, 0, 0)
-            columns.right.Size = columns.left.Size
-        end
-    end
     autoAdjustScale()
 
     -- ── Draggable ─────────────────────────────────────────────────
@@ -4939,7 +4914,6 @@ function Library:CreateWindow(options)
                 AutomaticSize = Enum.AutomaticSize.Y,
                 LayoutOrder = 2, Parent = colLayout
             }, { Create("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 8) }) })
-            table.insert(responsiveColumns, { layout = colLayout:FindFirstChildWhichIsA("UIListLayout"), left = leftCol, right = rightCol })
             autoAdjustScale()
         end
 
