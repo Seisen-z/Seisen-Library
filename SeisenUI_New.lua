@@ -3651,6 +3651,17 @@ function Library:Unload()
         self.NotificationContainer = nil
     end
 
+    -- Sweep GUIs orphaned by an older instance (e.g. a pill left behind when it was replaced)
+    for _, parent in ipairs({ game:GetService("CoreGui"), LocalPlayer:FindFirstChildOfClass("PlayerGui") }) do
+        pcall(function()
+            for _, gui in ipairs(parent:GetChildren()) do
+                if gui.Name == "SeisenPill" or gui.Name == "SeisenWidget" or gui.Name == "SeisenHub" or gui.Name == "SeisenHubNotify" then
+                    gui:Destroy()
+                end
+            end
+        end)
+    end
+
     -- Clear state tables
     self.Toggles = {}
     self.Options = {}
@@ -3678,11 +3689,143 @@ function Library:EnsureStatsWidget()
     return self._statsWidget
 end
 
+-- ── Minimize animation ────────────────────────────────────────────
+-- Mac-style: the window shrinks into the pill at the top centre and grows back out of it to where it was
+-- (including a spot the user dragged it to).
+-- Genie warp: the window is cut into horizontal strips (pruned clones) that funnel into the pill, top strips leading.
+-- Returns false when it can't run (e.g. first open, nothing saved yet) so the tween fallback is used.
+function Library:_GenieWindow(opening)
+    local gui, main, guiScale = self.ScreenGui, self._mainWindow, self._windowScale
+    local rect = self._restoreRect
+    if not (gui and main and guiScale) or (opening and not rect) then return false end
+    local ui = guiScale.Scale
+    if not opening then
+        local p = (main.AbsolutePosition - gui.AbsolutePosition) / ui
+        local s = main.AbsoluteSize / ui
+        rect = { x = p.X, y = p.Y, w = s.X, h = s.Y }
+        self._restoreRect = rect
+    end
+    self._toggleBusy = true
+    local N, DURATION, LAG = 12, 0.55, 0.4
+    local pillX, pillY, pillW = gui.AbsoluteSize.X / 2 / ui, 17 / ui, 120 / ui
+    local sh = rect.h / N
+
+    local base = main:Clone()
+    local function prune(inst)
+        for _, child in ipairs(inst:GetChildren()) do
+            if child:IsA("GuiObject") and not child.Visible then child:Destroy() else prune(child) end
+        end
+    end
+    prune(base)
+    base.AnchorPoint, base.Position, base.Size, base.Visible = Vector2.new(0, 0), UDim2.fromOffset(0, 0), UDim2.fromOffset(rect.w, rect.h), true
+
+    local holder = Instance.new("Frame")
+    holder.BackgroundTransparency, holder.Size, holder.ZIndex = 1, UDim2.fromScale(1, 1), 1000
+    local strips = {}
+    for j = 1, N do
+        local strip = Instance.new("Frame")
+        strip.BackgroundTransparency, strip.ClipsDescendants, strip.AnchorPoint = 1, true, Vector2.new(0.5, 0)
+        strip.ZIndex = j
+        Instance.new("UIScale", strip)
+        local content = j == N and base or base:Clone()
+        content.Position = UDim2.fromOffset(0, -(j - 1) * sh)
+        content.Parent = strip
+        strip.Parent = holder
+        strips[j] = strip
+    end
+    if not opening then self:CloseAllDropdowns() end
+    holder.Parent = gui
+    local wasVisible = main.Visible
+    main.Visible = false
+    gui.Enabled = true
+
+    local function ease(x) return x * x * (3 - 2 * x) end
+    local ys, ss = {}, {}
+    local function apply(progress)
+        for j = 1, N do
+            local e = ease(math.clamp((progress - LAG * (j - 1) / (N - 1)) / (1 - LAG), 0, 1))
+            local ex = ease(e)
+            ys[j] = rect.y + (j - 1) * sh + (pillY - rect.y - (j - 1) * sh) * e
+            ss[j] = 1 + (pillW / rect.w - 1) * e
+            strips[j].Position = UDim2.fromOffset(rect.x + rect.w / 2 + (pillX - rect.x - rect.w / 2) * ex, ys[j])
+            strips[j].UIScale.Scale = math.max(ss[j], 0.01)
+        end
+        for j = 1, N do
+            local gap = j < N and (ys[j + 1] - ys[j]) or sh * ss[j]
+            strips[j].Size = UDim2.fromOffset(rect.w, math.max(sh, gap / math.max(ss[j], 0.01)) + 1)
+        end
+    end
+
+    pcall(apply, opening and 1 or 0)
+    local start = os.clock()
+    local conn
+    conn = RunService.Heartbeat:Connect(function()
+        local t = math.clamp((os.clock() - start) / DURATION, 0, 1)
+        pcall(apply, opening and 1 - t or t)
+        if t < 1 then return end
+        conn:Disconnect()
+        pcall(function()
+            holder:Destroy()
+            main.Visible = wasVisible
+            if not opening then gui.Enabled = false end
+        end)
+        self._toggleBusy = false
+    end)
+    return true
+end
+
+function Library:_AnimateWindow(opening)
+    local gui, main, mainScale, guiScale = self.ScreenGui, self._mainWindow, self._mainWindowScale, self._windowScale
+    if not (gui and main and mainScale and guiScale) then
+        if gui then gui.Enabled = opening end
+        return
+    end
+    if self:_GenieWindow(opening) then return end
+    self._toggleBusy = true
+    local ui = guiScale.Scale
+    local pillCenter = UDim2.fromOffset(gui.AbsoluteSize.X / 2 / ui, 17 / ui)
+    local info = TweenInfo.new(0.35, Enum.EasingStyle.Quint, opening and Enum.EasingDirection.Out or Enum.EasingDirection.In)
+    local endPosition, endScale
+    if opening then
+        gui.Enabled = true
+        main.AnchorPoint = Vector2.new(0.5, 0.5)
+        main.Position = pillCenter
+        mainScale.Scale = 0.04
+        endPosition, endScale = self._restoreCenter or pillCenter, 1
+    else
+        self:CloseAllDropdowns()
+        self._restorePosition = main.Position
+        local center = (main.AbsolutePosition - gui.AbsolutePosition + main.AbsoluteSize / 2) / ui
+        self._restoreCenter = UDim2.fromOffset(center.X, center.Y)
+        main.AnchorPoint = Vector2.new(0.5, 0.5)
+        main.Position = self._restoreCenter
+        endPosition, endScale = pillCenter, 0.04
+    end
+    -- Reset the window only once both tweens are done, or the slower one would overwrite the reset
+    local pending = 2
+    local function oneDone()
+        pending = pending - 1
+        if pending > 0 then return end
+        pcall(function()
+            main.AnchorPoint = Vector2.new(0, 0)
+            main.Position = self._restorePosition or main.Position
+            mainScale.Scale = 1
+            if not opening then gui.Enabled = false end
+        end)
+        self._toggleBusy = false
+    end
+    local moveTween = TweenService:Create(main, info, { Position = endPosition })
+    local scaleTween = TweenService:Create(mainScale, info, { Scale = endScale })
+    moveTween.Completed:Connect(oneDone)
+    scaleTween.Completed:Connect(oneDone)
+    moveTween:Play()
+    scaleTween:Play()
+end
+
 -- ── Toggle (show/hide) ────────────────────────────────────────────
 function Library:Toggle()
-    if not self.ScreenGui or Library.IntroOngoing then return end
+    if not self.ScreenGui or Library.IntroOngoing or self._toggleBusy then return end
     local isOpening = not self.ScreenGui.Enabled
-    self.ScreenGui.Enabled = isOpening
 
     -- Performance HUD follows the "Show Performance HUD" setting; the minimized pill replaces it as the restore handle
     if self._widgetGui then
@@ -3693,6 +3836,7 @@ function Library:Toggle()
     elseif self._pillGui then
         self._pillGui.Enabled = false
     end
+    self:_AnimateWindow(isOpening)
 end
 
 -- ── MakeDraggable ─────────────────────────────────────────────────
@@ -8206,11 +8350,12 @@ function Library:EnsureMinPill()
     local pill = Create("Frame", {
         Name = "Pill", AnchorPoint = Vector2.new(0.5, 0),
         Position = UDim2.new(0.5, 0, 0, 4), Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H),
-        BackgroundColor3 = self.Theme.Element, BorderSizePixel = 0,
+        BackgroundColor3 = self.Theme.Background, BorderSizePixel = 0,
         ClipsDescendants = true, ZIndex = 10, Parent = gui
     }, { pillCorner, pillStroke })
-    self:RegisterElement(pill, "Element")
+    self:RegisterElement(pill, "Background")
     self:RegisterElement(pillStroke, "Border", "Color")
+    ClaySurface(pill)
 
     -- Content row: slides down on hover to make room for the title above it
     local row = Create("Frame", {
@@ -8235,6 +8380,7 @@ function Library:EnsureMinPill()
         BackgroundColor3 = self.Theme.Background, BackgroundTransparency = 0, Visible = false,
         ZIndex = 11, Parent = row
     }, { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) })
+    self:RegisterElement(avatar, "Background")
     task.spawn(function()
         local ok, url = pcall(function()
             return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
@@ -8301,15 +8447,20 @@ function Library:EnsureMinPill()
         Tween(titleLbl, { TextTransparency = 0 }, 0.2)
         Tween(row, { Position = UDim2.new(0, 0, 0, 18) }, 0.2)
     end)
-    hit.MouseLeave:Connect(function()
+    local function collapse(duration)
         hovered = false
-        Tween(pill, { Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H) }, 0.2)
-        Tween(nameLbl, { TextTransparency = 1 }, 0.15)
-        Tween(fpsLbl, { TextTransparency = 1 }, 0.15)
-        Tween(pingLbl, { TextTransparency = 1 }, 0.15)
-        Tween(pillCorner, { CornerRadius = UDim.new(0, 13) }, 0.2)
-        Tween(titleLbl, { TextTransparency = 1 }, 0.15)
-        Tween(row, { Position = UDim2.new(0, 0, 0, 0) }, 0.2)
+        Tween(pill, { Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H) }, duration)
+        Tween(nameLbl, { TextTransparency = 1 }, duration)
+        Tween(fpsLbl, { TextTransparency = 1 }, duration)
+        Tween(pingLbl, { TextTransparency = 1 }, duration)
+        Tween(pillCorner, { CornerRadius = UDim.new(0, 13) }, duration)
+        Tween(titleLbl, { TextTransparency = 1 }, duration)
+        Tween(row, { Position = UDim2.new(0, 0, 0, 0) }, duration)
+    end
+    hit.MouseLeave:Connect(function() collapse(0.2) end)
+    -- Hiding the pill (click to restore) never fires MouseLeave, so collapse it then
+    gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+        if not gui.Enabled then collapse(0.01) end
     end)
 
     local idx, lastCycle, lastUpdate, fps = 1, 0, 0, 60
@@ -8394,14 +8545,15 @@ function Library:CreateWidget(options)
         Name = "Widget",
         Size = UDim2.new(0, width, 0, 36),
         Position = UDim2.new(0, 12, 0, 12),
-        BackgroundColor3 = self.Theme.Element,
+        BackgroundColor3 = self.Theme.Background,
         BorderSizePixel = 0, ZIndex = 10,
         Parent = self._widgetGui
     }, {
         Create("UICorner", { CornerRadius = UDim.new(0, 10) }),
         Create("UIStroke", { Color = self.Theme.Border, Thickness = 1 })
     })
-    self:RegisterElement(widget, "Element")
+    self:RegisterElement(widget, "Background")
+    self:RegisterElement(widget:FindFirstChildWhichIsA("UIStroke"), "Border", "Color")
     ClaySurface(widget)
 
     -- Circular avatar icon (player headshot or letter fallback)
@@ -8519,7 +8671,7 @@ function Library:CreateWidget(options)
             _wDownPos = Vector2.new(input.Position.X, input.Position.Y)
         end
     end)
-    UserInputService.InputChanged:Connect(function(input)
+    table.insert(self.WidgetConnections, UserInputService.InputChanged:Connect(function(input)
         if _wDown and (input.UserInputType == Enum.UserInputType.MouseMovement
         or input.UserInputType == Enum.UserInputType.Touch) then
             local delta = Vector2.new(input.Position.X, input.Position.Y) - _wDownPos
@@ -8527,7 +8679,7 @@ function Library:CreateWidget(options)
                 _wMoved = true
             end
         end
-    end)
+    end))
     widget.InputEnded:Connect(function(input)
         if (input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch) and _wDown then
