@@ -3706,7 +3706,7 @@ function Library:_GenieWindow(opening)
         self._restoreRect = rect
     end
     self._toggleBusy = true
-    local N, DURATION, LAG = 12, 0.55, 0.4
+    local N, DURATION, LAG = 8, 0.55, 0.4
     local pillX, pillY, pillW = gui.AbsoluteSize.X / 2 / ui, 17 / ui, 120 / ui
     local sh = rect.h / N
 
@@ -3719,6 +3719,29 @@ function Library:_GenieWindow(opening)
     prune(base)
     base.AnchorPoint, base.Position, base.Size, base.Visible = Vector2.new(0, 0), UDim2.fromOffset(0, 0), UDim2.fromOffset(rect.w, rect.h), true
 
+    -- Each strip only keeps the objects that overlap its own rows (same visible-tree order in original and clone)
+    local function collect(inst, out)
+        for _, child in ipairs(inst:GetChildren()) do
+            if not (child:IsA("GuiObject") and not child.Visible) then
+                out[#out + 1] = child
+                collect(child, out)
+            end
+        end
+        return out
+    end
+    local origList = collect(main, {})
+    local top = main.AbsolutePosition.Y
+    local function trim(clone, j)
+        local lo, hi = (j - 1) * sh * ui, (j + 1) * sh * ui
+        for i, c in ipairs(collect(clone, {})) do
+            local o = origList[i]
+            if o and c.Parent and c:IsA("GuiObject") and c.Parent ~= clone then
+                local y0 = o.AbsolutePosition.Y - top
+                if y0 + o.AbsoluteSize.Y < lo or y0 > hi then c:Destroy() end
+            end
+        end
+    end
+
     local holder = Instance.new("Frame")
     holder.BackgroundTransparency, holder.Size, holder.ZIndex = 1, UDim2.fromScale(1, 1), 1000
     local strips = {}
@@ -3729,6 +3752,7 @@ function Library:_GenieWindow(opening)
         Instance.new("UIScale", strip)
         local content = j == N and base or base:Clone()
         content.Position = UDim2.fromOffset(0, -(j - 1) * sh)
+        if main.AbsoluteSize.Y > 0 then trim(content, j) end
         content.Parent = strip
         strip.Parent = holder
         strips[j] = strip
@@ -3752,7 +3776,7 @@ function Library:_GenieWindow(opening)
         end
         for j = 1, N do
             local gap = j < N and (ys[j + 1] - ys[j]) or sh * ss[j]
-            strips[j].Size = UDim2.fromOffset(rect.w, math.max(sh, gap / math.max(ss[j], 0.01)) + 1)
+            strips[j].Size = UDim2.fromOffset(rect.w, math.clamp(gap / math.max(ss[j], 0.01), sh, 2 * sh) + 1)
         end
     end
 
