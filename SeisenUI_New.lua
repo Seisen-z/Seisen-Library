@@ -23,15 +23,15 @@ local Library = {
     KeybindFrame = nil, KeybindRows = {}, KeybindConnections = {},
     ESPUrl = "https://raw.githubusercontent.com/mstudio45/MSESP/refs/heads/main/source.luau",
     Theme = {
-        Background    = Color3.fromRGB(32,  33,  46),
-        Sidebar       = Color3.fromRGB(27,  28,  40),
-        SidebarActive = Color3.fromRGB(61,  60,  82),
-        Content       = Color3.fromRGB(37,  38,  52),
-        Element       = Color3.fromRGB(48,  49,  67),
-        ElementHover  = Color3.fromRGB(59,  61,  81),
-        InputBg       = Color3.fromRGB(35,  36,  51),
-        Border        = Color3.fromRGB(75,  76,  99),
-        BorderLight   = Color3.fromRGB(108, 108, 133),
+        Background    = Color3.fromRGB(30,  30,  33),
+        Sidebar       = Color3.fromRGB(25,  25,  28),
+        SidebarActive = Color3.fromRGB(56,  56,  62),
+        Content       = Color3.fromRGB(36,  36,  40),
+        Element       = Color3.fromRGB(46,  46,  51),
+        ElementHover  = Color3.fromRGB(57,  57,  63),
+        InputBg       = Color3.fromRGB(32,  32,  36),
+        Border        = Color3.fromRGB(68,  68,  75),
+        BorderLight   = Color3.fromRGB(100, 100, 109),
         Accent        = Color3.fromRGB(185, 172, 231),
         AccentHover   = Color3.fromRGB(207, 197, 246),
         AccentDark    = Color3.fromRGB(73,  66,  96),
@@ -1968,10 +1968,10 @@ function Library:CreateColorPicker(parent, options)
     })
     self:RegisterElement(cpNameLabel, "Text", "TextColor3")
 
-    local hexLabel = Create("TextLabel", {
+    local hexLabel = Create("TextBox", {
         Size = UDim2.new(0, 60, 0, 20), Position = UDim2.new(1, -62, 0, 4),
         BackgroundColor3 = self.Theme.InputBg,
-        Text = "#" .. value:ToHex():upper(),
+        Text = "#" .. value:ToHex():upper(), ClearTextOnFocus = false,
         TextColor3 = self.Theme.Accent, Font = Enum.Font.Code, TextSize = 10,
         TextXAlignment = Enum.TextXAlignment.Center, Parent = container
     }, {
@@ -2065,6 +2065,18 @@ function Library:CreateColorPicker(parent, options)
         table.insert(self.KeybindConnections, c2)
     end
     hookDrag(svFrame, dragSV); hookDrag(hueStrip, dragHue)
+
+    hexLabel.FocusLost:Connect(function()
+        local ok, col = pcall(Color3.fromHex, (hexLabel.Text:gsub("[#%s]", "")))
+        if ok and col then
+            H, S, V = Color3.toHSV(col)
+            svCursor.Position = UDim2.new(S, -5, 1-V, -5)
+            hueCursor.Position = UDim2.new(0, -2, H, -2)
+            applyColor()
+        else
+            hexLabel.Text = "#" .. value:ToHex():upper()
+        end
+    end)
 
     previewBtn.Activated:Connect(function()
         pickerOpen = not pickerOpen
@@ -7704,7 +7716,7 @@ function Library:_BuildManagersTab(window, folderName)
     -- 36 built-in themes (name, bg, element, accent, text, border)
     local function hex(h) return Color3.fromHex(h) end
     local builtInThemes = {
-        { n="Default",      bg=hex"101014", el=hex"1c1c24", ac=hex"9b9baa", tx=hex"e1e1e8", br=hex"2d2d38" },
+        { n="Default",      bg=hex"1e1e21", el=hex"24242a", ac=hex"9b9baa", tx=hex"e1e1e8", br=hex"44444b" },
         { n="Mint",         bg=hex"1c1c1c", el=hex"242424", ac=hex"3db488", tx=hex"ffffff", br=hex"373737" },
         { n="Rose",         bg=hex"1c1c1c", el=hex"242424", ac=hex"db4467", tx=hex"ffffff", br=hex"373737" },
         { n="Ocean",        bg=hex"16232a", el=hex"1b2b34", ac=hex"6699cc", tx=hex"ffffff", br=hex"343d46" },
@@ -7765,9 +7777,15 @@ function Library:_BuildManagersTab(window, folderName)
         return names
     end
 
+    local charcoalDefault = {}
+    for k, c in pairs(self.Theme) do charcoalDefault[k] = c end
+
     local function ApplyTheme(v)
         local t = themeMap[v]
-        if t then
+        if v == "Default" then
+            for k, c in pairs(charcoalDefault) do self.Theme[k] = c end
+            if self.UpdateColorsUsingRegistry then self:UpdateColorsUsingRegistry() end
+        elseif t then
             self.Theme.Background    = t.bg
             self.Theme.Sidebar       = t.bg
             self.Theme.Content       = t.el
