@@ -8179,6 +8179,7 @@ function Library:EnsureMinPill()
 
     local gui = Instance.new("ScreenGui")
     gui.Name = "SeisenPill"
+    gui.IgnoreGuiInset = true
     gui.ResetOnSpawn = false
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     gui.DisplayOrder = math.max(1, (self.ScreenGui and self.ScreenGui.DisplayOrder or 10) - 1)
@@ -8188,45 +8189,90 @@ function Library:EnsureMinPill()
     end
     self._pillGui = gui
 
-    local COMPACT_W, COMPACT_H, HOVER_W, HOVER_H = 120, 26, 168, 36
+    local COMPACT_W, COMPACT_H, HOVER_W, HOVER_H = 120, 26, 200, 68
     local pillStroke = Create("UIStroke", { Color = self.Theme.Border, Thickness = 1 })
+    local pillCorner = Create("UICorner", { CornerRadius = UDim.new(0, 13) })
     local pill = Create("Frame", {
         Name = "Pill", AnchorPoint = Vector2.new(0.5, 0),
-        Position = UDim2.new(0.5, 0, 0, 8), Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H),
+        Position = UDim2.new(0.5, 0, 0, 4), Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H),
         BackgroundColor3 = self.Theme.Element, BorderSizePixel = 0,
         ClipsDescendants = true, ZIndex = 10, Parent = gui
-    }, { Create("UICorner", { CornerRadius = UDim.new(1, 0) }), pillStroke })
+    }, { pillCorner, pillStroke })
     self:RegisterElement(pill, "Element")
     self:RegisterElement(pillStroke, "Border", "Color")
 
+    -- Content row: slides down on hover to make room for the title above it
+    local row = Create("Frame", {
+        Name = "Row", Size = UDim2.new(1, 0, 0, 26), BackgroundTransparency = 1, ZIndex = 11, Parent = pill
+    })
+    local titleLbl = Create("TextLabel", {
+        Size = UDim2.new(1, 0, 0, 14), Position = UDim2.new(0, 0, 0, 4),
+        BackgroundTransparency = 1, Text = "Seisen Hub", TextTransparency = 1,
+        TextColor3 = self.Theme.Text, Font = Enum.Font.GothamBold, TextSize = 12, ZIndex = 11, Parent = pill
+    })
+    self:RegisterElement(titleLbl, "Text", "TextColor3")
+
+    -- Local player's avatar headshot (power icon shows until it loads)
     local powerIcon = Create("ImageLabel", {
-        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 10, 0.5, -7),
-        BackgroundTransparency = 1, ImageColor3 = self.Theme.Accent, ZIndex = 11, Parent = pill
+        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 8, 0, 6),
+        BackgroundTransparency = 1, ImageColor3 = self.Theme.Accent, ZIndex = 11, Parent = row
     })
     self:ApplyIcon(powerIcon, "power")
     self:RegisterElement(powerIcon, "Accent", "ImageColor3")
+    local avatar = Create("ImageLabel", {
+        Size = UDim2.new(0, 20, 0, 20), Position = UDim2.new(0, 5, 0, 3),
+        BackgroundColor3 = self.Theme.Background, BackgroundTransparency = 0, Visible = false,
+        ZIndex = 11, Parent = row
+    }, { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) })
+    task.spawn(function()
+        local ok, url = pcall(function()
+            return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48)
+        end)
+        if ok and url and avatar.Parent then
+            avatar.Image = url
+            avatar.Visible = true
+            powerIcon.Visible = false
+        end
+    end)
 
-    local signalIcon = Create("ImageLabel", {
-        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -36, 0.5, -7),
-        BackgroundTransparency = 1, ImageColor3 = self.Theme.Accent, ZIndex = 11, Parent = pill
-    })
-    self:ApplyIcon(signalIcon, "signal")
-    self:RegisterElement(signalIcon, "Accent", "ImageColor3")
+    -- Four bars pulsing in a heartbeat rhythm
+    local bars = {}
+    for i = 1, 4 do
+        bars[i] = Create("Frame", {
+            Size = UDim2.new(0, 3, 0, 4), AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(1, -46 + (i - 1) * 5, 0, 13),
+            BackgroundColor3 = self.Theme.Accent, BorderSizePixel = 0, ZIndex = 11, Parent = row
+        }, { Create("UICorner", { CornerRadius = UDim.new(1, 0) }) })
+        self:RegisterElement(bars[i], "Accent")
+    end
 
     local countLbl = Create("TextLabel", {
-        Size = UDim2.new(0, 16, 1, 0), Position = UDim2.new(1, -20, 0, 0),
+        Size = UDim2.new(0, 16, 0, 26), Position = UDim2.new(1, -22, 0, 0),
         BackgroundTransparency = 1, Text = "0", TextColor3 = self.Theme.Text,
-        Font = Enum.Font.GothamBold, TextSize = 11, ZIndex = 11, Parent = pill
+        Font = Enum.Font.GothamBold, TextSize = 11, ZIndex = 11, Parent = row
     })
     self:RegisterElement(countLbl, "Text", "TextColor3")
 
     local nameLbl = Create("TextLabel", {
-        Size = UDim2.new(1, -78, 1, 0), Position = UDim2.new(0, 32, 0, 0),
+        Size = UDim2.new(1, -84, 0, 26), Position = UDim2.new(0, 30, 0, 0),
         BackgroundTransparency = 1, Text = "", TextTransparency = 1,
         TextColor3 = self.Theme.TextDim, Font = Enum.Font.Gotham, TextSize = 11,
-        TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 11, Parent = pill
+        TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 11, Parent = row
     })
     self:RegisterElement(nameLbl, "TextDim", "TextColor3")
+
+    local fpsLbl = Create("TextLabel", {
+        Size = UDim2.new(0.5, -14, 0, 20), Position = UDim2.new(0, 14, 0, 44),
+        BackgroundTransparency = 1, Text = "FPS --", TextTransparency = 1, TextXAlignment = Enum.TextXAlignment.Left,
+        TextColor3 = self.Theme.TextDim, Font = Enum.Font.GothamMedium, TextSize = 11, ZIndex = 11, Parent = pill
+    })
+    self:RegisterElement(fpsLbl, "TextDim", "TextColor3")
+    local pingLbl = Create("TextLabel", {
+        Size = UDim2.new(0.5, -14, 0, 20), Position = UDim2.new(0.5, 0, 0, 44),
+        BackgroundTransparency = 1, Text = "-- ms", TextTransparency = 1, TextXAlignment = Enum.TextXAlignment.Right,
+        TextColor3 = self.Theme.TextDim, Font = Enum.Font.GothamMedium, TextSize = 11, ZIndex = 11, Parent = pill
+    })
+    self:RegisterElement(pingLbl, "TextDim", "TextColor3")
 
     local hit = Create("TextButton", {
         Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", ZIndex = 12, Parent = pill
@@ -8238,19 +8284,42 @@ function Library:EnsureMinPill()
         hovered = true
         Tween(pill, { Size = UDim2.new(0, HOVER_W, 0, HOVER_H) }, 0.2)
         Tween(nameLbl, { TextTransparency = 0 }, 0.2)
+        Tween(fpsLbl, { TextTransparency = 0 }, 0.2)
+        Tween(pingLbl, { TextTransparency = 0 }, 0.2)
+        Tween(pillCorner, { CornerRadius = UDim.new(0, 12) }, 0.2)
+        Tween(titleLbl, { TextTransparency = 0 }, 0.2)
+        Tween(row, { Position = UDim2.new(0, 0, 0, 18) }, 0.2)
     end)
     hit.MouseLeave:Connect(function()
         hovered = false
         Tween(pill, { Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H) }, 0.2)
         Tween(nameLbl, { TextTransparency = 1 }, 0.15)
+        Tween(fpsLbl, { TextTransparency = 1 }, 0.15)
+        Tween(pingLbl, { TextTransparency = 1 }, 0.15)
+        Tween(pillCorner, { CornerRadius = UDim.new(0, 13) }, 0.2)
+        Tween(titleLbl, { TextTransparency = 1 }, 0.15)
+        Tween(row, { Position = UDim2.new(0, 0, 0, 0) }, 0.2)
     end)
 
-    local idx, lastCycle, lastUpdate = 1, 0, 0
-    local conn = RunService.Heartbeat:Connect(function()
+    local idx, lastCycle, lastUpdate, fps = 1, 0, 0, 60
+    local conn = RunService.Heartbeat:Connect(function(dt)
         if not gui.Enabled then return end
         local now = os.clock()
+        -- Heartbeat: a lub-dub pulse travelling across the bars
+        local phase = (now * 1.3) % 1
+        for i, bar in ipairs(bars) do
+            local p = (phase - (i - 1) * 0.06) % 1
+            local pulse = math.max(math.exp(-((p - 0.1) * 14) ^ 2), 0.7 * math.exp(-((p - 0.3) * 14) ^ 2))
+            bar.Size = UDim2.new(0, 3, 0, 4 + math.floor(14 * pulse))
+        end
+        fps = fps + (1 / math.max(dt, 1e-3) - fps) * 0.05
         if now - lastUpdate < 0.25 then return end
         lastUpdate = now
+
+        local ping = 0
+        pcall(function() ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+        fpsLbl.Text = "FPS " .. math.floor(fps + 0.5)
+        pingLbl.Text = math.floor(ping + 0.5) .. " ms"
 
         local active = {}
         for flag, t in pairs(Library.Toggles) do
