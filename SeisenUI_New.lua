@@ -866,7 +866,7 @@ function Library:CreateToggle(parent, options)
     end
 
     local toggleObj = {
-        Value = state, Keybind = keybind, Type = "Toggle",
+        Value = state, Keybind = keybind, Type = "Toggle", Name = toggleName,
         SetValue = function(s, val)
             state = val; s.Value = val
             Tween(switchBg, { BackgroundColor3 = val and self.Theme.Toggle or self.Theme.ToggleOff })
@@ -1915,7 +1915,7 @@ function Library:CreateCheckbox(parent, options)
     end })
 
     local cbObj = {
-        Value = state, Type = "Toggle",
+        Value = state, Type = "Toggle", Name = cbName,
         SetValue = function(s, v)
             state = v; s.Value = v
             Tween(box, { BackgroundColor3 = v and self.Theme.Toggle or self.Theme.ToggleOff })
@@ -3599,22 +3599,21 @@ function Library:Unload()
     end
     self._flyGyro = nil
 
-    -- Reset player stats that sliders may have changed but have no toggle. The WalkSpeed/JumpPower
-    -- toggles above already restore the game's actual original values when turned off; this is only
-    -- a fallback for whichever of those toggles was never touched this session.
+    -- Restore only the values this library actually changed, using the game's own values recorded
+    -- before the first change. Never write a hardcoded default - an untouched stat keeps the game's value.
     pcall(function()
         local char = LocalPlayer and LocalPlayer.Character
-        if char then
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then
-                hum.WalkSpeed = self._originalWalkSpeed or 16
-                if self._originalUseJumpPower ~= nil then
-                    hum.UseJumpPower = self._originalUseJumpPower
-                end
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if self._originalWalkSpeed ~= nil then
+                hum.WalkSpeed = self._originalWalkSpeed
+            end
+            if self._originalJumpPower ~= nil then
+                hum.UseJumpPower = self._originalUseJumpPower
                 if hum.UseJumpPower then
-                    hum.JumpPower = self._originalJumpPower or 50
+                    hum.JumpPower = self._originalJumpPower
                 else
-                    hum.JumpHeight = self._originalJumpPower or 7.2
+                    hum.JumpHeight = self._originalJumpPower
                 end
             end
         end
@@ -3627,6 +3626,11 @@ function Library:Unload()
     if self.ScreenGui then
         pcall(function() self.ScreenGui:Destroy() end)
         self.ScreenGui = nil
+    end
+
+    if self._pillGui then
+        pcall(function() self._pillGui:Destroy() end)
+        self._pillGui = nil
     end
 
     -- Destroy widget ScreenGui
@@ -3680,21 +3684,14 @@ function Library:Toggle()
     local isOpening = not self.ScreenGui.Enabled
     self.ScreenGui.Enabled = isOpening
 
+    -- Performance HUD follows the "Show Performance HUD" setting; the minimized pill replaces it as the restore handle
+    if self._widgetGui then
+        self._widgetGui.Enabled = self._perfHudEnabled == true
+    end
     if not isOpening then
-        -- Window minimized: show Performance HUD widget so user can tap it to restore
-        self:EnsureStatsWidget()
-        if self._widgetGui then
-            self._widgetGui.Enabled = true
-        end
-    else
-        -- Window restored: keep HUD visible only if "Show Performance HUD" setting is ON
-        if self._widgetGui then
-            if not self._perfHudEnabled then
-                self._widgetGui.Enabled = false
-            else
-                self._widgetGui.Enabled = true
-            end
-        end
+        self:EnsureMinPill().Enabled = true
+    elseif self._pillGui then
+        self._pillGui.Enabled = false
     end
 end
 
@@ -6148,8 +6145,8 @@ function Library:_BuildConfigTab(window)
                         walkSpeedCharConnection = nil
                         wasActive = true
                     end
-                    if wasActive and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                        LocalPlayer.Character.Humanoid.WalkSpeed = self._originalWalkSpeed or 16
+                    if wasActive and self._originalWalkSpeed ~= nil and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                        LocalPlayer.Character.Humanoid.WalkSpeed = self._originalWalkSpeed
                     end
                 end
             end)
@@ -6238,14 +6235,12 @@ function Library:_BuildConfigTab(window)
                         local char = LocalPlayer.Character
                         if not char then return end
                         local hum = char:FindFirstChildOfClass("Humanoid")
-                        if hum then
-                            if self._originalUseJumpPower ~= nil then
-                                hum.UseJumpPower = self._originalUseJumpPower
-                            end
+                        if hum and self._originalJumpPower ~= nil then
+                            hum.UseJumpPower = self._originalUseJumpPower
                             if hum.UseJumpPower then
-                                hum.JumpPower = self._originalJumpPower or 50
+                                hum.JumpPower = self._originalJumpPower
                             else
-                                hum.JumpHeight = self._originalJumpPower or 7.2
+                                hum.JumpHeight = self._originalJumpPower
                             end
                         end
                     end)
@@ -8176,6 +8171,113 @@ function Library:_BuildManagersTab(window, folderName)
 end
 
 -- ── Widget (floating mini HUD) ────────────────────────────────────
+-- ── Minimized pill ────────────────────────────────────────────────
+-- Compact top-centre pill shown while the window is minimized: power icon, a count of the
+-- toggles currently ON, and on hover it grows and cycles through their names. Click restores.
+function Library:EnsureMinPill()
+    if self._pillGui and self._pillGui.Parent then return self._pillGui end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "SeisenPill"
+    gui.ResetOnSpawn = false
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    gui.DisplayOrder = math.max(1, (self.ScreenGui and self.ScreenGui.DisplayOrder or 10) - 1)
+    pcall(function() gui.Parent = game:GetService("CoreGui") end)
+    if not gui.Parent then
+        gui.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui") or game:GetService("StarterGui")
+    end
+    self._pillGui = gui
+
+    local COMPACT_W, COMPACT_H, HOVER_W, HOVER_H = 120, 26, 168, 36
+    local pillStroke = Create("UIStroke", { Color = self.Theme.Border, Thickness = 1 })
+    local pill = Create("Frame", {
+        Name = "Pill", AnchorPoint = Vector2.new(0.5, 0),
+        Position = UDim2.new(0.5, 0, 0, 8), Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H),
+        BackgroundColor3 = self.Theme.Element, BorderSizePixel = 0,
+        ClipsDescendants = true, ZIndex = 10, Parent = gui
+    }, { Create("UICorner", { CornerRadius = UDim.new(1, 0) }), pillStroke })
+    self:RegisterElement(pill, "Element")
+    self:RegisterElement(pillStroke, "Border", "Color")
+
+    local powerIcon = Create("ImageLabel", {
+        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(0, 10, 0.5, -7),
+        BackgroundTransparency = 1, ImageColor3 = self.Theme.Accent, ZIndex = 11, Parent = pill
+    })
+    self:ApplyIcon(powerIcon, "power")
+    self:RegisterElement(powerIcon, "Accent", "ImageColor3")
+
+    local signalIcon = Create("ImageLabel", {
+        Size = UDim2.new(0, 14, 0, 14), Position = UDim2.new(1, -36, 0.5, -7),
+        BackgroundTransparency = 1, ImageColor3 = self.Theme.Accent, ZIndex = 11, Parent = pill
+    })
+    self:ApplyIcon(signalIcon, "signal")
+    self:RegisterElement(signalIcon, "Accent", "ImageColor3")
+
+    local countLbl = Create("TextLabel", {
+        Size = UDim2.new(0, 16, 1, 0), Position = UDim2.new(1, -20, 0, 0),
+        BackgroundTransparency = 1, Text = "0", TextColor3 = self.Theme.Text,
+        Font = Enum.Font.GothamBold, TextSize = 11, ZIndex = 11, Parent = pill
+    })
+    self:RegisterElement(countLbl, "Text", "TextColor3")
+
+    local nameLbl = Create("TextLabel", {
+        Size = UDim2.new(1, -78, 1, 0), Position = UDim2.new(0, 32, 0, 0),
+        BackgroundTransparency = 1, Text = "", TextTransparency = 1,
+        TextColor3 = self.Theme.TextDim, Font = Enum.Font.Gotham, TextSize = 11,
+        TextTruncate = Enum.TextTruncate.AtEnd, ZIndex = 11, Parent = pill
+    })
+    self:RegisterElement(nameLbl, "TextDim", "TextColor3")
+
+    local hit = Create("TextButton", {
+        Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Text = "", ZIndex = 12, Parent = pill
+    })
+    hit.Activated:Connect(function() Library:Toggle() end)
+
+    local hovered = false
+    hit.MouseEnter:Connect(function()
+        hovered = true
+        Tween(pill, { Size = UDim2.new(0, HOVER_W, 0, HOVER_H) }, 0.2)
+        Tween(nameLbl, { TextTransparency = 0 }, 0.2)
+    end)
+    hit.MouseLeave:Connect(function()
+        hovered = false
+        Tween(pill, { Size = UDim2.new(0, COMPACT_W, 0, COMPACT_H) }, 0.2)
+        Tween(nameLbl, { TextTransparency = 1 }, 0.15)
+    end)
+
+    local idx, lastCycle, lastUpdate = 1, 0, 0
+    local conn = RunService.Heartbeat:Connect(function()
+        if not gui.Enabled then return end
+        local now = os.clock()
+        if now - lastUpdate < 0.25 then return end
+        lastUpdate = now
+
+        local active = {}
+        for flag, t in pairs(Library.Toggles) do
+            if t.Value == true and t.Name and not tostring(flag):match("^BuiltIn_")
+                and not tostring(flag):match("^SaveManager_") and not tostring(flag):match("^ThemeCreator_") then
+                table.insert(active, t.Name)
+            end
+        end
+        table.sort(active)
+        countLbl.Text = tostring(#active)
+
+        if #active == 0 then
+            nameLbl.Text = "No active features"
+        else
+            if now - lastCycle >= 1.5 then
+                lastCycle = now
+                idx = idx % #active + 1
+            end
+            nameLbl.Text = active[math.min(idx, #active)]
+        end
+    end)
+    self.WidgetConnections = self.WidgetConnections or {}
+    table.insert(self.WidgetConnections, conn)
+
+    return gui
+end
+
 function Library:CreateWidget(options)
     if not self.ScreenGui then return end
     local opts     = options or {}
