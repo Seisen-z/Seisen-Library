@@ -7591,6 +7591,17 @@ function Library:_BuildGamesTab(window)
         ["7671049560"]  = "The Forge",
         ["10039338037"] = "Build a Ring Farm",
         ["10006104044"] = "Wizard Alchemy",
+        ["10035204815"] = "Ride a Pet",
+        ["10502841145"] = "Anime Astral Simulator",
+        ["10539411000"] = "Clean all the Leaves",
+        ["10563114921"] = "Steal an Egg",
+        ["10684750879"] = "+1 Loot to Forge",
+        ["10765288803"] = "Break and Steal an Egg",
+        ["5595353122"]  = "Slayer 2",
+        ["6035872082"]  = "Rivals",
+        ["8946565814"]  = "Anime Origins",
+        ["985731078"]   = "World // Zero",
+        ["9970645639"]  = "Run a Restaurant",
     }
 
     task.spawn(function()
