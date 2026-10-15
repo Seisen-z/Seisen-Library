@@ -10322,7 +10322,7 @@ do
 		end })
 		connection:AddParagraph({ Title = "Website", Content = "seisen.vercel.app/trackstat\nKeep your key private. Reset revokes the old key but keeps history." })
 		s.summary = stats:AddLabel({ Text = "Enable tracking to capture an inventory baseline. Existing inventory is not counted as session gains." })
-		s.toggle = stats:AddToggle({ Name = "Track this account", Default = false, Callback = function(enabled)
+		s.toggle = stats:AddToggle({ Name = "Track this account", Flag = "Trackstat_Track", Default = false, Callback = function(enabled)
 			if enabled then
 				if s.busy or game.GameId ~= 3317771874 then
 					s.status:SetText(s.busy and "Connection request is busy; try again shortly" or "This game is not supported yet")
