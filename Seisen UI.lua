@@ -4271,6 +4271,15 @@ local function MakeGhost(win)
 	end
 end
 
+-- Phones get smaller UI than desktop (window, pill, notifications): 0.8 on a narrow or touch-only screen, otherwise 1
+local function CompactFactor(gui)
+	local viewport = gui.AbsoluteSize
+	if (viewport.X == 0 or viewport.Y == 0) and workspace.CurrentCamera then
+		viewport = workspace.CurrentCamera.ViewportSize
+	end
+	return (viewport.X < 900 or UserInputService.TouchEnabled and not UserInputService.MouseEnabled) and 0.8 or 1
+end
+
 -- What the window really covers on screen (its own size times its UIScale)
 function Window:_shownSize()
 	local size = self.Root.Size
@@ -4296,6 +4305,7 @@ function Window:_enableResize(minSize, maxSize)
 	local stroke = Stroke(mark, Theme.Muted, 2, 0.55)
 	New("UIGradient", { Rotation = 45, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.55, 1), NumberSequenceKeypoint.new(0.85, 0), NumberSequenceKeypoint.new(1, 0) }), Parent = stroke })
 	local dragging = false
+	local origin = Vector2.zero -- the window's visible top-left while it is being resized
 	local startMouse, startSize, current, velocity, target, lastSize = Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero, Vector2.zero
 	local function paint(on)
 		Tween(stroke, { Color = on and Theme.Accent or Theme.Muted, Transparency = on and 0 or 0.55 }, on and 0.15 or 0.3)
@@ -4308,9 +4318,10 @@ function Window:_enableResize(minSize, maxSize)
 			return
 		end
 		if not self._resizeActive then
-			local topLeft = root.AbsolutePosition - self.Gui.AbsolutePosition
+			-- the anchor point is where the window sits; the window is drawn scaled around it, so the visible top-left comes from the shown size
+			origin = root.AbsolutePosition + root.AbsoluteSize * root.AnchorPoint - self.Gui.AbsolutePosition - self:_shownSize() / 2
 			root.AnchorPoint = Vector2.zero
-			root.Position = UDim2.fromOffset(topLeft.X, topLeft.Y)
+			root.Position = UDim2.fromOffset(origin.X, origin.Y)
 			current = Vector2.new(root.Size.X.Offset, root.Size.Y.Offset)
 			velocity, lastSize = Vector2.zero, current
 		end
@@ -4348,11 +4359,15 @@ function Window:_enableResize(minSize, maxSize)
 		if size ~= lastSize then
 			lastSize = size
 			root.Size = UDim2.fromOffset(size.X, size.Y)
+			-- growing pushes the window back on screen instead of running off the edge
+			local shown, screen = Vector2.new(size.X, size.Y) * self.RootScale.Scale, self.Gui.AbsoluteSize
+			origin = Vector2.new(math.clamp(origin.X, 0, math.max(screen.X - shown.X, 0)), math.clamp(origin.Y, 0, math.max(screen.Y - shown.Y, 0)))
+			root.Position = UDim2.fromOffset(origin.X, origin.Y)
 		end
 		if not dragging and (current - target).Magnitude < 0.3 and velocity.Magnitude < 3 then
 			current, velocity, lastSize = target, Vector2.zero, target
 			root.Size = UDim2.fromOffset(target.X, target.Y)
-			local center = root.AbsolutePosition - self.Gui.AbsolutePosition + root.AbsoluteSize / 2
+			local center = origin + self:_shownSize() / 2
 			root.AnchorPoint = Vector2.new(0.5, 0.5)
 			center = self:_clamp(center)
 			root.Position = UDim2.fromOffset(center.X, center.Y)
@@ -5039,7 +5054,10 @@ function Window:_buildIsland()
 		Parent = gui,
 	})
 	local corner = Round(island, ISLAND.Height / 2)
-	local scale = New("UIScale", { Parent = island })
+	local base = CompactFactor(gui)
+	local scale = New("UIScale", { Scale = base, Parent = island })
+	self._islandBase = base
+	self.IsCompact = base < 1 -- on phones the pill always sits top-centre and is not dragged
 	self.Island = island
 	self._islandScale = scale
 
@@ -5213,8 +5231,8 @@ function Window:_buildIsland()
 		cornerTween = Tween(corner, { CornerRadius = UDim.new(0, radius) }, time)
 		if changed or instant then
 			if not instant and not pressedOn and not dragged then
-				scale.Scale = growing and 0.96 or 1.03
-				Tween(scale, { Scale = 1 }, growing and 0.55 or 0.4, Enum.EasingStyle.Back)
+				scale.Scale = (growing and 0.96 or 1.03) * base
+				Tween(scale, { Scale = base }, growing and 0.55 or 0.4, Enum.EasingStyle.Back)
 			end
 			for n, g in pairs(groups) do
 				if n ~= name then
@@ -5244,7 +5262,7 @@ function Window:_buildIsland()
 	end
 	self._islandReset = function()
 		hover, pressedOn, dragged, dragStart = false, false, false, nil
-		scale.Scale = 1
+		scale.Scale = base
 		go("Compact", true)
 	end
 
@@ -5268,7 +5286,7 @@ function Window:_buildIsland()
 			return
 		end
 		if not pressedOn then
-			Tween(scale, { Scale = 1.04 }, 0.18)
+			Tween(scale, { Scale = 1.04 * base }, 0.18)
 		end
 		task.delay(0.12, function()
 			if hoverId == mine and hover and not self.Open and not dragged then
@@ -5282,7 +5300,7 @@ function Window:_buildIsland()
 		hoverId += 1
 		local mine = hoverId
 		if not pressedOn then
-			Tween(scale, { Scale = 1 }, 0.25)
+			Tween(scale, { Scale = base }, 0.25)
 		end
 		task.delay(state == "Expanded" and 0.28 or 0.1, function()
 			if hoverId == mine and not hover and not self.Open then
@@ -5293,13 +5311,13 @@ function Window:_buildIsland()
 	hit.InputBegan:Connect(function(input)
 		if IsPress(input) then
 			pressedOn, dragged = true, false
-			Tween(scale, { Scale = 0.95 }, 0.12, Enum.EasingStyle.Quad)
+			Tween(scale, { Scale = 0.95 * base }, 0.12, Enum.EasingStyle.Quad)
 			dragStart = Vector2.new(input.Position.X, input.Position.Y)
 			dragOrigin = clampAnchor(Vector2.new(island.Size.X.Offset, island.Size.Y.Offset), anchor())
 		end
 	end)
 	self:_listen(UserInputService.InputChanged, function(input)
-		if not dragStart or not IsMove(input) or self.Open then
+		if not dragStart or not IsMove(input) or self.Open or self.IsCompact then
 			return
 		end
 		local delta = Vector2.new(input.Position.X, input.Position.Y) - dragStart
@@ -5309,7 +5327,7 @@ function Window:_buildIsland()
 			end
 			dragged, hover = true, false
 			go("Compact")
-			Tween(scale, { Scale = 1.06 }, 0.2)
+			Tween(scale, { Scale = 1.06 * base }, 0.2)
 		end
 		local size = Vector2.new(ISLAND.Width, ISLAND.Height)
 		screenAnchor = clampAnchor(size, dragOrigin + delta)
@@ -5323,7 +5341,7 @@ function Window:_buildIsland()
 			return
 		end
 		pressedOn, dragStart = false, nil
-		Tween(scale, { Scale = 1 }, 0.35, Enum.EasingStyle.Back)
+		Tween(scale, { Scale = base }, 0.35, Enum.EasingStyle.Back)
 		if dragged then
 			local home = Vector2.new(gui.AbsoluteSize.X / 2, ISLAND.Top)
 			if screenAnchor and (screenAnchor - home).Magnitude < 28 then
@@ -5409,8 +5427,8 @@ function Window:Minimize()
 			if self.Generation ~= gen then
 				return
 			end
-			self._islandScale.Scale = 0.9
-			Tween(self._islandScale, { Scale = 1 }, 0.3)
+			self._islandScale.Scale = 0.9 * self._islandBase
+			Tween(self._islandScale, { Scale = self._islandBase }, 0.3)
 			Tween(self.Island, { GroupTransparency = 0 }, 0.18, Enum.EasingStyle.Quad)
 			MorphOut(ghost, stroke, 0.2)
 		end)
@@ -5759,6 +5777,7 @@ function Lib:CreateWindow(o)
 
 	self.PageHolder = New("Frame", { Position = UDim2.fromOffset(32, 76), Size = UDim2.new(1, -64, 1, -100), BackgroundTransparency = 1, ClipsDescendants = true, Parent = main })
 	self.Toasts = New("Frame", { Name = "Notifications", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -20, 1, -20), Size = UDim2.new(0, 280, 1, -40), BackgroundTransparency = 1, ZIndex = 50, Parent = gui })
+	New("UIScale", { Scale = CompactFactor(gui), Parent = self.Toasts })
 	List(self.Toasts, 4).VerticalAlignment = Enum.VerticalAlignment.Bottom
 	self.NotifyOrder, self.ToastList, self.MaxNotifications = 0, {}, o.MaxNotifications or 4
 	self:_listen(gui:GetPropertyChangedSignal("AbsoluteSize"), function()
@@ -6030,6 +6049,7 @@ local function NotifyHost()
 	local gui = New("ScreenGui", { Name = "SeisenNotify", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 10 })
 	ParentGui(gui)
 	local toasts = New("Frame", { Name = "Notifications", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -20, 1, -20), Size = UDim2.new(0, 280, 1, -40), BackgroundTransparency = 1, ZIndex = 50, Parent = gui })
+	New("UIScale", { Scale = CompactFactor(gui), Parent = toasts })
 	List(toasts, 4).VerticalAlignment = Enum.VerticalAlignment.Bottom
 	Lib._notifyHost = setmetatable({ Gui = gui, Toasts = toasts, NotifyOrder = 0, ToastList = {}, MaxNotifications = 4, Connections = {} }, Window)
 	return Lib._notifyHost
@@ -7029,9 +7049,7 @@ function Window:_setBaseScale(scale)
 	end
 	if viewport.X == 0 or viewport.Y == 0 then return end
 	local size = self.Root.Size
-	-- Phones get a smaller window than desktop so more of the game stays visible
-	local compact = (viewport.X < 900 or UserInputService.TouchEnabled and not UserInputService.MouseEnabled) and 0.8 or 1
-	self.BaseScale = math.clamp(math.min(1, viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32)) * compact * self._requestedScale, 0.25, 2)
+	self.BaseScale = math.clamp(math.min(1, viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32)) * CompactFactor(self.Gui) * self._requestedScale, 0.25, 2)
 	self.RootScale.Scale = self.BaseScale
 end
 
