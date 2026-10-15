@@ -5679,9 +5679,7 @@ function Window:Destroy()
 		end
 	end
 	if #Lib.Windows == 0 and Lib._trackstat then
-		Lib._trackstat.enabled, Lib._trackstat.closed = false, true
-		local state = Lib._trackstat
-		if state.snapshot and not state.busy then task.spawn(function() Lib:_TrackstatSend(state) end) end
+		Lib:_TrackstatClose(Lib._trackstat)
 	end
 end
 Window.Unload = Window.Destroy
@@ -8494,16 +8492,34 @@ end
 function Window:_buildServerHop(tab)
 	local section = tab:AddRightSection("Server Hop", "shuffle")
 	local status = section:AddLabel({ Text = "Pick a maximum player count, including you." })
-	local state = { max = 2, auto = false, busy = false, nextAt = 0 }
+	local state = { max = 2, auto = false, busy = false, nextAt = 0, reconnect = true, reconnectAt = nil, checkAt = 0 }
 	local autoExecute, armed = true, false
+	local function queueScript()
+		if not autoExecute or armed or not self.Gui.Parent then return end
+		local queue = queue_on_teleport or queueonteleport
+		if type(queue) ~= "function" or type(self.ScriptUrl) ~= "string" or self.ScriptUrl == "" then
+			Lib:Notify({ Title = "Auto Execute", Content = type(queue) ~= "function" and "Teleport queue is unavailable in this executor." or "No script URL is available for this game.", Type = "warning" })
+			return
+		end
+		armed = pcall(queue, ("loadstring(game:HttpGet(%q))()"):format(self.ScriptUrl))
+	end
+	local function reconnect()
+		if not state.reconnect or state.reconnectAt or not self.Gui.Parent then return end
+		queueScript()
+		state.reconnectAt = os.clock() + 3
+		status:SetText("Disconnected. Reconnecting in 3 seconds...")
+	end
+	self:_listen(GuiService.ErrorMessageChanged, function(message)
+		if message and #message > 0 then reconnect() end
+	end)
 	self:_listen(TeleportService.TeleportInitFailed, function(player)
 		if player == LocalPlayer then state.failed = true end
 	end)
 	local function hop(automatic)
-		if state.busy or not self.Gui.Parent then return end
+		if state.busy or state.reconnectAt or not self.Gui.Parent then return end
 		if #Players:GetPlayers() <= state.max then status:SetText("This server is within your player limit."); return end
 		state.busy = true
-		state.active = function() return self.Gui.Parent ~= nil and (not automatic or state.auto) end
+		state.active = function() return self.Gui.Parent ~= nil and not state.reconnectAt and (not automatic or state.auto) end
 		status:SetText("Searching for a quieter server...")
 		task.spawn(function()
 			local moved = ServerTeleport(true, state)
@@ -8518,22 +8534,46 @@ function Window:_buildServerHop(tab)
 	section:AddToggle({ Name = "Player Check Hop", Flag = "BuiltIn_PlayerCheckHop", Default = false,
 		Tooltip = "Keep hopping when the server has more players than your selected maximum.",
 		Callback = function(value) state.auto = value; state.nextAt = 0; if not value then status:SetText("Auto hop stopped.") end end })
+	section:AddToggle({ Name = "Auto Reconnect", Flag = "BuiltIn_AutoReconnect", Default = true,
+		Tooltip = "Rejoin this server after a kick or disconnect. Retries every 6 seconds; uses a new server when no server ID is available.",
+		Callback = function(value)
+			state.reconnect = value
+			if not value and state.reconnectAt then state.reconnectAt = nil; status:SetText("Auto reconnect stopped.") end
+		end })
 	section:AddToggle({ Name = "Auto Execute On Teleport", Flag = "BuiltIn_AutoExecute", Default = true,
 		Tooltip = "Run this game's script again after teleporting. Requires your executor's teleport queue.",
 		Callback = function(value) autoExecute = value end })
 	self._serverHopStep = function()
+		if not self.Gui.Parent then return end
+		if state.reconnect and os.clock() >= state.checkAt then
+			state.checkAt = os.clock() + 2
+			pcall(function()
+				local promptGui = game:GetService("CoreGui"):FindFirstChild("RobloxPromptGui")
+				local overlay = promptGui and promptGui:FindFirstChild("promptOverlay")
+				local prompt = overlay and overlay:FindFirstChild("ErrorPrompt")
+				if prompt and prompt.Visible then reconnect() end
+			end)
+		end
+		if state.reconnectAt then
+			if os.clock() >= state.reconnectAt then
+				state.reconnectAt = os.clock() + 6
+				status:SetText("Reconnecting...")
+				pcall(function()
+					if game.JobId and #game.JobId > 0 then
+						TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+					else
+						TeleportService:Teleport(game.PlaceId, LocalPlayer)
+					end
+				end)
+			end
+			return
+		end
 		if not state.auto or state.busy or os.clock() < state.nextAt then return end
 		state.nextAt = os.clock() + 3
 		if #Players:GetPlayers() > state.max then hop(true) else status:SetText("Good server found. Waiting...") end
 	end
 	self:_listen(LocalPlayer.OnTeleport, function(teleportState)
-		if not autoExecute or armed or not self.Gui.Parent or (teleportState ~= Enum.TeleportState.Started and teleportState ~= Enum.TeleportState.InProgress) then return end
-		local queue = queue_on_teleport or queueonteleport
-		if type(queue) ~= "function" or type(self.ScriptUrl) ~= "string" or self.ScriptUrl == "" then
-			Lib:Notify({ Title = "Auto Execute", Content = type(queue) ~= "function" and "Teleport queue is unavailable in this executor." or "No script URL is available for this game.", Type = "warning" })
-			return
-		end
-		armed = pcall(queue, ("loadstring(game:HttpGet(%q))()"):format(self.ScriptUrl))
+		if teleportState == Enum.TeleportState.Started or teleportState == Enum.TeleportState.InProgress then queueScript() end
 	end)
 end
 
@@ -10559,12 +10599,31 @@ do
 		if s.catalog == catalog then s.catalog = nil end
 	end
 
+	function Lib:_TrackstatClose(s)
+		if s.closed then return end
+		s.enabled, s.closed = false, true
+		if s.registered then s.presenceSession = s.presenceSession or HttpService:GenerateGUID(false) end
+		task.spawn(function()
+			if s.presenceSession then
+				for attempt = 1, 3 do
+					local sent = self:_TrackstatRPC("trackstat_presence", { p_key = s.key, p_session = s.presenceSession, p_game = tostring(s.gameId), p_active = false })
+					if sent then break end
+					if attempt < 3 then task.wait(1) end
+				end
+			end
+			if s.snapshot and not s.busy then self:_TrackstatSend(s) end
+		end)
+	end
+
 	function Lib:_TrackstatHeartbeat()
 		local s = self._trackstat
 		if not s or s.closed or s.linking or not s.enabled or not s.registered or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
+		s.presenceSession = s.presenceSession or HttpService:GenerateGUID(false)
 		s.presenceBusy, s.presenceAt = true, os.clock() + 15
 		task.spawn(function()
-			self:_TrackstatRPC("trackstat_heartbeat", { p_key = s.key, p_game = tostring(s.gameId) })
+			if not s.closed then
+				self:_TrackstatRPC("trackstat_presence", { p_key = s.key, p_session = s.presenceSession, p_game = tostring(s.gameId), p_active = true })
+			end
 			s.presenceBusy = false
 		end)
 	end
