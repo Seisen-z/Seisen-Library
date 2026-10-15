@@ -590,11 +590,12 @@ local function IsMove(input)
 	return input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch
 end
 
-local function GuiParent()
-	local ok, parent = pcall(function()
-		return (gethui and gethui()) or game:GetService("CoreGui")
-	end)
-	return ok and parent or LocalPlayer:WaitForChild("PlayerGui")
+-- Same as the old library: CoreGui first (inside a pcall, since some mobile executors refuse it), then the player's own PlayerGui
+local function ParentGui(gui, preferred)
+	pcall(function() gui.Parent = preferred or game:GetService("CoreGui") end)
+	if not gui.Parent then
+		gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	end
 end
 
 local function ServerTeleport(lowest)
@@ -5629,7 +5630,7 @@ function Lib:CreateWindow(o)
 			syn.protect_gui(gui)
 		end
 	end)
-	gui.Parent = o.Parent or GuiParent()
+	ParentGui(gui, o.Parent)
 	self.Gui = gui
 	Lib.ScreenGui = gui
 	Lib.ToggleKeybind = self.Keybind
@@ -5992,7 +5993,7 @@ end
 -- ------------------------------------------------------------ notifications
 -- remove GUIs a previous instance of the library left behind (matched by exact name only)
 local function SweepOrphans()
-	for _, parent in ipairs({ GuiParent(), LocalPlayer:FindFirstChildOfClass("PlayerGui"), game:GetService("CoreGui") }) do
+	for _, parent in ipairs({ game:GetService("CoreGui"), LocalPlayer:FindFirstChildOfClass("PlayerGui") }) do
 		pcall(function()
 			for _, g in ipairs(parent:GetChildren()) do
 				if g.Name == "SeisenNotify" or g.Name == "SeisenWidget" or g.Name == "SeisenFlyPad" then
@@ -6009,7 +6010,7 @@ local function NotifyHost()
 	end
 	SweepOrphans()
 	local gui = New("ScreenGui", { Name = "SeisenNotify", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 10 })
-	gui.Parent = GuiParent()
+	ParentGui(gui)
 	local toasts = New("Frame", { Name = "Notifications", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -20, 1, -20), Size = UDim2.new(0, 280, 1, -40), BackgroundTransparency = 1, ZIndex = 50, Parent = gui })
 	List(toasts, 4).VerticalAlignment = Enum.VerticalAlignment.Bottom
 	Lib._notifyHost = setmetatable({ Gui = gui, Toasts = toasts, NotifyOrder = 0, ToastList = {}, MaxNotifications = 4, Connections = {} }, Window)
@@ -7897,7 +7898,7 @@ function Lib:CreateWidget(o)
 		end)
 	end
 	local gui = New("ScreenGui", { Name = "SeisenWidget", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 20, Enabled = true })
-	gui.Parent = GuiParent()
+	ParentGui(gui)
 	self._widgetGui = gui
 	local frame = New("Frame", { Position = UDim2.fromOffset(12, 12), Size = UDim2.fromOffset(170, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = Theme.Surface2, BackgroundTransparency = 0.1, BorderSizePixel = 0, Parent = gui })
 	Round(frame, 10)
@@ -7972,7 +7973,7 @@ end
 -- on-screen up/down buttons for mobile fly
 function Lib:CreateFlyPad(onUp, onDown)
 	local gui = New("ScreenGui", { Name = "SeisenFlyPad", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 20 })
-	gui.Parent = GuiParent()
+	ParentGui(gui)
 	local function pad(text, y, fn)
 		local b = New("TextButton", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -24, 1, y), Size = UDim2.fromOffset(56, 56), BackgroundColor3 = Theme.Surface2, BackgroundTransparency = 0.2, Text = text, TextColor3 = Theme.Text, TextSize = 14, FontFace = Fonts.Bold, AutoButtonColor = false, Parent = gui })
 		Round(b, 100)
@@ -10427,6 +10428,37 @@ do
 		return self:_TrackstatRPC("trackstat_push", { p_key = s.key, p_session = s.session, p_sequence = s.sequence, p_game = tostring(game.GameId), p_snapshot = s.snapshot })
 	end
 
+	-- A new device for a Roblox account that already has a history asks to join it; the owner approves once on the website,
+	-- which hands this device the existing key. No answer within 15 minutes (or "start a new history") keeps a fresh key.
+	function Lib:_TrackstatLink(s)
+		s.linking = true
+		task.spawn(function()
+			local nonce = newKey():sub(4)
+			local ok, res = self:_TrackstatRPC("trackstat_link_request", { p_nonce = nonce, p_roblox_id = tostring(LocalPlayer.UserId), p_username = LocalPlayer.Name })
+			if ok and type(res) == "table" and res.status == "pending" and not s.closed then
+				s.status:SetText("New device: approve it on seisen.vercel.app/trackstat to keep your history")
+				s.skipLink:SetVisible(true)
+				local deadline = os.clock() + 900
+				while s.linking and not s.closed and os.clock() < deadline do
+					task.wait(5)
+					local got, answer = self:_TrackstatRPC("trackstat_link_pickup", { p_nonce = nonce })
+					if got and type(answer) == "table" and answer.status ~= "pending" then
+						if answer.status == "approved" and type(answer.key) == "string" and answer.key:match("^sp_%x+$") and #answer.key == 67 then
+							s.key, s.registered = answer.key, false
+							s.status:SetText("Linked to your existing history")
+						else s.status:SetText("Starting a new history on this device") end
+						break
+					end
+				end
+			end
+			s.linking = false
+			if not s.closed then
+				s.skipLink:SetVisible(false)
+				self:_TrackstatSave()
+			end
+		end)
+	end
+
 	function Lib:_BuildTrackstatTab(win)
 		local tab = win:AddTab("Trackstat", "activity", true)
 		tab._entry.Button.LayoutOrder = 0 -- right below Home (-2) and Cloud (-1)
@@ -10434,6 +10466,7 @@ do
 		local stats = tab:AddRightSection("Pet Simulator 99", "chart-no-axes-combined")
 		local path = ROOT_FOLDER .. "/Trackstat/" .. tostring(LocalPlayer.UserId) .. ".json"
 		local saved = ReadJson(path) or {}
+		local fresh = HasFiles() and next(saved) == nil -- a device that has never run Trackstat for this Roblox account
 		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
 		local s = self._trackstat
 		if not s or s.closed then
@@ -10442,9 +10475,9 @@ do
 		end
 		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
 		s.status = connection:AddLabel({ Text = "Ready · tracking is off" })
-		connection:AddLabel({ Text = self:_TrackstatSave() and "Key saved for this Roblox account on this device." or "No file storage: copy your key before closing this session." })
+		connection:AddLabel({ Text = fresh and "Looking for your existing history…" or self:_TrackstatSave() and "Key saved for this Roblox account on this device." or "No file storage: copy your key before closing this session." })
 		connection:AddButton({ Name = "Copy connection key", Callback = function()
-			if s.busy then return end
+			if s.busy or s.linking then return end
 			s.busy = true
 			local ok, err = self:_TrackstatConnect()
 			s.busy = false
@@ -10456,7 +10489,7 @@ do
 			else s.status:SetText(tostring(err)) end
 		end })
 		connection:AddButton({ Name = "Reset connection key", ConfirmText = "Click again to revoke old key", Callback = function()
-			if s.busy then return end
+			if s.busy or s.linking then return end
 			s.busy = true
 			local ok, err = self:_TrackstatConnect()
 			if ok then
@@ -10474,13 +10507,15 @@ do
 		connection:AddButton({ Name = "Copy Website", Callback = function()
 			win:CopyToClipboard("https://seisen.vercel.app/trackstat", "Website link copied")
 		end })
+		s.skipLink = connection:AddButton({ Name = "Start a new history instead", Callback = function() s.linking = false end })
+		s.skipLink:SetVisible(false)
 		local function addToggle(section, name, gameId, flag, about)
 			local summary = section:AddLabel({ Text = "Enable tracking to capture an inventory baseline. Existing inventory is not counted as session gains." })
 			local toggle
 			toggle = section:AddToggle({ Name = "Track this account", Flag = flag, Default = false, Callback = function(enabled)
 				if enabled then
-					if s.busy or game.GameId ~= gameId then
-						s.status:SetText(s.busy and "Connection request is busy; try again shortly" or "This toggle is for " .. name .. " only")
+					if s.busy or s.linking or game.GameId ~= gameId then
+						s.status:SetText(s.linking and "Waiting for this device to be approved on the website" or s.busy and "Connection request is busy; try again shortly" or "This toggle is for " .. name .. " only")
 						task.defer(function() if not s.closed then toggle:Set(false) end end)
 						return
 					end
@@ -10519,6 +10554,7 @@ do
 		end
 		addToggle(stats, "Pet Simulator 99", PET_SIMULATOR_99, "Trackstat_Track", "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
 		addToggle(tab:AddRightSection("Steal an Egg", "egg"), "Steal an Egg", STEAL_AN_EGG, "Trackstat_Track_StealAnEgg", "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
+		if fresh then self:_TrackstatLink(s) end
 	end
 end
 
