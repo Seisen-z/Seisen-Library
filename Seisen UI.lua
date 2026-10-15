@@ -5572,6 +5572,11 @@ function Window:Destroy()
 			task.spawn(function() Lib:_SupabaseRPC("library_leave", { p_session = state.session }) end)
 		end
 	end
+	if #Lib.Windows == 0 and Lib._trackstat then
+		Lib._trackstat.enabled, Lib._trackstat.closed = false, true
+		local state = Lib._trackstat
+		if state.snapshot and not state.busy then task.spawn(function() Lib:_TrackstatSend(state) end) end
+	end
 end
 Window.Unload = Window.Destroy
 
@@ -5738,6 +5743,7 @@ function Lib:CreateWindow(o)
 	local frames, last = 0, os.clock()
 	self:_listen(RunService.RenderStepped, function()
 		if Lib._usage then Lib:_UpdateUsage() end
+		if Lib._trackstat then Lib:_UpdateTrackstat() end
 		frames += 1
 		local now = os.clock()
 		if now - last >= 0.5 then
@@ -10104,6 +10110,241 @@ function Lib:_BuildManagersTab(window, folderName)
 	return tab
 end
 
+---------------------------------------------------------------- Trackstat (separate project; keys never enter configs)
+do
+	local url = "https://xsygxfeutjcwmqejslbv.supabase.co/rest/v1/rpc/"
+	local publicKey = "sb_publishable_565kome-b7OZJPc7-kWSPQ_n_nwH8q5"
+	local function newKey()
+		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
+	end
+	local function counts()
+		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
+	end
+
+	function Lib:_TrackstatRPC(name, args)
+		local req = syn and syn.request or http and http.request or request or http_request
+		if not req then return false, "Executor HTTP is unavailable" end
+		local ok, res = pcall(req, { Url = url .. name, Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode(args) })
+		if not ok or type(res) ~= "table" then return false, "Trackstat request failed; try again" end
+		local decoded, data = pcall(HttpService.JSONDecode, HttpService, res.Body)
+		if not res.StatusCode or res.StatusCode < 200 or res.StatusCode >= 300 then
+			return false, decoded and type(data) == "table" and data.message or "Trackstat is temporarily unavailable"
+		end
+		return decoded, data
+	end
+
+	function Lib:_TrackstatSave()
+		local s = self._trackstat
+		if not HasFiles() then return false end
+		return pcall(function()
+			if not isfolder(ROOT_FOLDER) then makefolder(ROOT_FOLDER) end
+			if not isfolder(ROOT_FOLDER .. "/Trackstat") then makefolder(ROOT_FOLDER .. "/Trackstat") end
+			writefile(s.path, HttpService:JSONEncode({ key = s.key, pending = s.pending }))
+		end)
+	end
+
+	function Lib:_TrackstatConnect()
+		local s = self._trackstat
+		local ok, data = self:_TrackstatRPC("trackstat_register", { p_key = s.key, p_roblox_id = tostring(LocalPlayer.UserId), p_username = LocalPlayer.Name })
+		-- A staged key survives an interrupted reset without losing the account.
+		if not ok and data == "Connection key was reset" and s.pending then
+			s.key, s.pending = s.pending, nil
+			self:_TrackstatSave()
+			ok, data = self:_TrackstatRPC("trackstat_register", { p_key = s.key, p_roblox_id = tostring(LocalPlayer.UserId), p_username = LocalPlayer.Name })
+		end
+		s.registered = ok
+		return ok, data
+	end
+
+	function Lib:_TrackstatRead()
+		local s = self._trackstat
+		local current, owned = {}, counts()
+		for _, item in pairs(s.inventory.Container(LocalPlayer):All()) do
+			local kind = item.Class.Name
+			local metric = kind ~= "Pet" and kind ~= "Currency" and "items" or nil
+			if kind == "Pet" then
+				metric = item:IsGargantuan() and "gargantuan" or item:IsTitanic() and "titanic" or item:IsHuge() and "huge" or nil
+				kind = metric or kind
+			end
+			if metric then
+				local name, amount = item:GetName(), item:GetAmount()
+				local id = kind .. ":" .. item:GetId() .. ":" .. name
+				current[id] = current[id] or { name = name, kind = kind, metric = metric, owned = 0 }
+				current[id].owned += amount
+				owned[metric] += amount
+			end
+		end
+		for id, item in pairs(current) do
+			local gain = s.previous and math.max(0, item.owned - ((s.previous[id] and s.previous[id].owned) or 0)) or 0
+			s.gained[item.metric] += gain
+			s.details[id] = s.details[id] or { name = item.name, kind = item.kind, gained = 0, owned = 0 }
+			s.details[id].gained += gain
+		end
+		local details = {}
+		for id, item in pairs(s.details) do
+			item.owned = current[id] and current[id].owned or 0
+			if item.owned > 0 or item.gained > 0 then table.insert(details, table.clone(item)) end
+		end
+		table.sort(details, function(a, b) return a.kind == b.kind and a.name < b.name or a.kind < b.kind end)
+		while #details > 500 do table.remove(details) end
+		s.previous = current
+		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details }
+		if s.stopping or os.clock() >= s.uploadAt then s.stacks, s.catalog = self:_TrackstatInventory(s) end
+		s.snapshot.inventory = s.stacks
+		s.summaryText = string.format("Owned: %s items · %s Huge · %s Titanic · %s Gargantuan\nSession gains: %s items · %s Huge · %s Titanic · %s Gargantuan", FormatCount(owned.items), FormatCount(owned.huge), FormatCount(owned.titanic), FormatCount(owned.gargantuan), FormatCount(s.gained.items), FormatCount(s.gained.huge), FormatCount(s.gained.titanic), FormatCount(s.gained.gargantuan))
+	end
+
+	-- Full inventory stacks for the website; static icon/rarity/description go to the shared catalog once per key
+	function Lib:_TrackstatInventory(s)
+		local entries, catalog = {}, {}
+		if setthreadidentity then pcall(setthreadidentity, 2) end -- lazily required item modules fail at the default identity
+		for _, item in pairs(s.inventory.Container(LocalPlayer):All()) do
+			pcall(function()
+				local class, pet = item.Class.Name, item.Class.Name == "Pet"
+				local variant = pet and (item:IsGolden() and "g" or "") .. (item:IsRainbow() and "r" or "") .. (item:IsShiny() and "s" or "") or ""
+				local key = class .. ":" .. item:GetId() .. ":" .. (item:GetTier() or 0) .. ":" .. variant
+				if not catalog[key] then
+					local rarity = item:GetRarity()
+					catalog[key] = { key = key, class = class, name = item:GetName():sub(1, 100), icon = tostring(item:GetIcon()):match("%d+") or "", rarity = rarity.DisplayName, rarity_num = rarity.RarityNumber, rarity_color = "#" .. rarity.Color:ToHex(), description = tostring(item:GetDesc() or ""):sub(1, 300) }
+				end
+				local charms = {}
+				for _, charm in pairs(pet and item:GetCharms() or {}) do table.insert(charms, charm.dir._id) end
+				table.insert(entries, { k = key, a = item:GetAmount(), r = item:GetRAP() or nil, x = item:GetExistCount() or nil, l = pet and item:GetXPLevel() or nil, f = item:IsLocked() or nil, e = pet and item:GetExclusiveLevel() or nil, cs = pet and item:GetCharmSlots() or nil, ch = #charms > 0 and charms or nil })
+			end)
+		end
+		table.sort(entries, function(a, b) return (a.r or 0) * a.a > (b.r or 0) * b.a end)
+		while #entries > 1000 do table.remove(entries) end
+		return entries, catalog
+	end
+
+	function Lib:_TrackstatCatalog(s)
+		local keys = {}
+		for key in pairs(s.catalog) do if not s.known[key] then table.insert(keys, key) end end
+		if #keys > 0 then
+			local ok, missing = self:_TrackstatRPC("trackstat_catalog_missing", { p_keys = keys })
+			if not ok then error(missing, 0) end
+			for i = 1, #missing, 300 do
+				local items = {}
+				for j = i, math.min(i + 299, #missing) do table.insert(items, s.catalog[missing[j]]) end
+				local added, reason = self:_TrackstatRPC("trackstat_catalog_add", { p_key = s.key, p_items = items })
+				if not added then error(reason, 0) end
+			end
+			for _, key in ipairs(keys) do s.known[key] = true end
+		end
+		s.catalog = nil
+	end
+
+	function Lib:_UpdateTrackstat()
+		local s = self._trackstat
+		if not s or s.closed or s.busy or not (s.enabled or s.stopping) or os.clock() < s.nextAt then return end
+		s.busy, s.nextAt = true, os.clock() + 5
+		task.spawn(function()
+			local ok, err = pcall(function()
+				if not s.registered then
+					local connected, reason = self:_TrackstatConnect()
+					if not connected then error(reason, 0) end
+				end
+				if s.closed then return end
+				if s.enabled then
+					local identity = getthreadidentity and getthreadidentity()
+					local read, reason = pcall(self._TrackstatRead, self)
+					if identity and setthreadidentity then pcall(setthreadidentity, identity) end
+					if not read then error(reason, 0) end
+					s.summary:SetText(s.summaryText)
+				end
+				if s.snapshot and (s.stopping or os.clock() >= s.uploadAt) then
+					if s.catalog then self:_TrackstatCatalog(s) end
+					local sent, reason = self:_TrackstatSend(s)
+					s.stopping = false
+					if not sent then error(reason, 0) end
+					s.uploadAt = os.clock() + 30
+					if not s.closed then s.status:SetText((s.enabled and "Tracking" or "Stopped") .. " · synced " .. os.date("%X")) end
+				end
+			end)
+			s.busy = false
+			if not ok and not s.closed then s.status:SetText(tostring(err)); s.nextAt = os.clock() + 15 end
+		end)
+	end
+
+	function Lib:_TrackstatSend(s)
+		s.sequence += 1
+		return self:_TrackstatRPC("trackstat_push", { p_key = s.key, p_session = s.session, p_sequence = s.sequence, p_game = tostring(game.GameId), p_snapshot = s.snapshot })
+	end
+
+	function Lib:_BuildTrackstatTab(win)
+		local tab = win:AddTab("Trackstat", "activity", true)
+		local connection = tab:AddLeftSection("Account connection", "link")
+		local stats = tab:AddRightSection("Pet Simulator 99", "chart-no-axes-combined")
+		local path = ROOT_FOLDER .. "/Trackstat/" .. tostring(LocalPlayer.UserId) .. ".json"
+		local saved = ReadJson(path) or {}
+		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
+		local s = self._trackstat
+		if not s or s.closed then
+			s = { key = saved.key, pending = saved.pending, path = path, enabled = false, busy = false, nextAt = 0, known = {} }
+			self._trackstat = s
+		end
+		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
+		s.status = connection:AddLabel({ Text = "Ready · tracking is off" })
+		connection:AddLabel({ Text = self:_TrackstatSave() and "Key saved for this Roblox account on this device." or "No file storage: copy your key before closing this session." })
+		connection:AddButton({ Name = "Copy connection key", Callback = function()
+			if s.busy then return end
+			s.busy = true
+			local ok, err = self:_TrackstatConnect()
+			s.busy = false
+			if s.closed then return end
+			if ok then
+				local copy = setclipboard or toclipboard
+				local copied = copy and pcall(copy, s.key)
+				s.status:SetText(copied and "Key copied · paste it on the website Trackstat tab" or "Executor clipboard is unavailable")
+			else s.status:SetText(tostring(err)) end
+		end })
+		connection:AddButton({ Name = "Reset connection key", ConfirmText = "Click again to revoke old key", Callback = function()
+			if s.busy then return end
+			s.busy = true
+			local ok, err = self:_TrackstatConnect()
+			if ok then
+				s.pending = newKey()
+				local persisted = self:_TrackstatSave()
+				if not HasFiles() or persisted then
+					ok, err = self:_TrackstatRPC("trackstat_reset", { p_key = s.key, p_new_key = s.pending })
+					if ok then s.key, s.pending = s.pending, nil; self:_TrackstatSave() end
+				else ok, err = false, "Key file could not be saved; reset was not sent" end
+			end
+			s.busy = false
+			if not s.closed then s.status:SetText(ok and "Key reset · copy the new key to reconnect your website" or tostring(err)) end
+		end })
+		connection:AddParagraph({ Title = "Website", Content = "seisen.vercel.app/trackstat\nKeep your key private. Reset revokes the old key but keeps history." })
+		s.summary = stats:AddLabel({ Text = "Enable tracking to capture an inventory baseline. Existing inventory is not counted as session gains." })
+		s.toggle = stats:AddToggle({ Name = "Track this account", Default = false, Callback = function(enabled)
+			if enabled then
+				if s.busy or game.GameId ~= 3317771874 then
+					s.status:SetText(s.busy and "Connection request is busy; try again shortly" or "This game is not supported yet")
+					task.defer(function() if not s.closed then s.toggle:Set(false) end end)
+					return
+				end
+				local identity = getthreadidentity and getthreadidentity()
+				local ok, inventory = pcall(function() return require(game.ReplicatedStorage.Library.Universal.Inventory) end)
+				if identity and setthreadidentity then pcall(setthreadidentity, identity) end
+				if not ok then
+					s.status:SetText("Inventory is not ready; try again shortly")
+					task.defer(function() if not s.closed then s.toggle:Set(false) end end)
+					return
+				end
+				s.inventory, s.previous, s.details, s.gained = inventory, nil, {}, counts()
+				s.snapshot, s.stopping = nil, false
+				s.session, s.sequence, s.uploadAt, s.nextAt = HttpService:GenerateGUID(false), 0, 0, 0
+				s.enabled = true
+				self:_UpdateTrackstat()
+			else
+				s.enabled = false
+				s.stopping, s.nextAt = s.snapshot ~= nil, 0
+				s.status:SetText("Tracking stopped · history kept on website")
+			end
+		end })
+		stats:AddParagraph({ Title = "What is tracked", Content = "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals." })
+	end
+end
+
 function Lib:_buildBuiltIns(win, o)
 	pcall(function()
 		self:RecordExecution(o)
@@ -10127,6 +10368,7 @@ function Lib:_buildBuiltIns(win, o)
 	end
 	self:_BuildESPTab(win)
 	self:_BuildSuggestionsTab(win)
+	if o.Trackstat ~= false then self:_BuildTrackstatTab(win) end
 	if o.Cloud ~= false then
 		task.defer(function()
 			if win.Gui.Parent and not win._cloudConfigs then
