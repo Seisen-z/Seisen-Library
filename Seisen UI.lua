@@ -551,7 +551,10 @@ local function FormatCount(value)
 	value = tonumber(value) or 0
 	local magnitude = math.abs(value)
 	local divisor, suffix = 1, ""
-	if magnitude >= 1e12 then divisor, suffix = 1e12, "T"
+	if magnitude >= 1e21 then divisor, suffix = 1e21, "Sx"
+	elseif magnitude >= 1e18 then divisor, suffix = 1e18, "Qi"
+	elseif magnitude >= 1e15 then divisor, suffix = 1e15, "Qa"
+	elseif magnitude >= 1e12 then divisor, suffix = 1e12, "T"
 	elseif magnitude >= 1e9 then divisor, suffix = 1e9, "B"
 	elseif magnitude >= 1e6 then divisor, suffix = 1e6, "M"
 	elseif magnitude >= 1e3 then divisor, suffix = 1e3, "K" end
@@ -10123,7 +10126,9 @@ do
 	local function newKey()
 		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
 	end
-	local function counts()
+	local PET_SIMULATOR_99, STEAL_AN_EGG = 3317771874, 10563114921
+	local function counts(gameId)
+		if gameId == STEAL_AN_EGG then return { pets = 0, eggs = 0, gear = 0, items = 0 } end
 		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
 	end
 
@@ -10162,8 +10167,93 @@ do
 		return ok, data
 	end
 
+	-- Positive inventory changes since the last read become session gains; returns the per-item rows for the website
+	function Lib:_TrackstatDelta(s, current)
+		for id, item in pairs(current) do
+			local gain = s.previous and math.max(0, item.owned - ((s.previous[id] and s.previous[id].owned) or 0)) or 0
+			s.gained[item.metric] += gain
+			s.details[id] = s.details[id] or { name = item.name, kind = item.kind, gained = 0, owned = 0 }
+			s.details[id].gained += gain
+		end
+		local details = {}
+		for id, item in pairs(s.details) do
+			item.owned = current[id] and current[id].owned or 0
+			if item.owned > 0 or item.gained > 0 then table.insert(details, table.clone(item)) end
+		end
+		table.sort(details, function(a, b) return a.kind == b.kind and a.name < b.name or a.kind < b.kind end)
+		while #details > 500 do table.remove(details) end
+		s.previous = current
+		return details
+	end
+
+	-- Steal An Egg keeps everything in the game's own save data (pets, eggs, gear, items, money, speed)
+	function Lib:_TrackstatReadStealAnEgg()
+		local s = self._trackstat
+		if setthreadidentity then pcall(setthreadidentity, 2) end
+		local data, owned, current, catalog, stacks, tools = s.save.Peek(), { pets = 0, eggs = 0, gear = 0, items = 0 }, {}, {}, {}, {}
+		for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
+			local uid = tool:GetAttribute("UID")
+			if uid then tools[uid] = tool end
+		end
+		local function add(kind, key, amount, name, icon, rarity, description)
+			if not catalog[key] then
+				catalog[key] = { key = key, kind = kind, name = tostring(name):sub(1, 100), icon = tostring(icon or ""):match("%d+") or "", description = tostring(description or ""):sub(1, 300) }
+				rarity = type(rarity) == "string" and s.rarities[rarity] or rarity
+				if rarity then catalog[key].rarity, catalog[key].rarity_num, catalog[key].rarity_color = rarity.DisplayName, rarity.Rank, "#" .. rarity.Color:ToHex() end
+			end
+			local metric = ({ pet = "pets", egg = "eggs", gear = "gear", item = "items" })[kind]
+			current[key] = current[key] or { name = catalog[key].name, kind = kind, metric = metric, owned = 0 }
+			current[key].owned += amount
+			owned[metric] += amount
+		end
+		local function mutationList(mutations)
+			local list = {}
+			for _, mutation in pairs(mutations or {}) do table.insert(list, mutation) end
+			table.sort(list)
+			return #list > 0 and list or nil
+		end
+		for uid, pet in pairs(data.Inventory) do
+			local dir, tool = s.assets[pet.Category], tools[uid]
+			local config = tool and tool:FindFirstChild("Configuration")
+			local key = "pet:" .. pet.Category
+			add("pet", key, 1, dir and dir.DisplayName or pet.Category, dir and dir.Icon, dir and dir.Rarity)
+			table.insert(stacks, { k = key, a = 1, w = dir and dir.ModelWeight and dir.ModelWeight * (pet.Scale or 1) or nil, m = mutationList(pet.Mutations), p = config and config:GetAttribute("perSecond") or nil, f = tool and tool:GetAttribute("Favorite") or nil })
+		end
+		for _, egg in pairs(data.EggInventory) do
+			local dir = s.assets[egg.AssetCategory]
+			local info, key = dir and dir.Egg, "egg:" .. egg.AssetCategory
+			add("egg", key, 1, info and info.DisplayName or egg.AssetCategory .. " Egg", info and info.Icon, dir and dir.Rarity)
+			table.insert(stacks, { k = key, a = 1, w = info and info.WeightKg, m = mutationList(egg.Mutations), pl = egg.Placement and 1 or nil })
+		end
+		for id, amount in pairs(data.GearInventory) do
+			local gear, key = s.gears[id], "gear:" .. id
+			add("gear", key, amount, gear and gear.DisplayName or id, gear and gear.Icon, gear and gear.Rarity, gear and gear.Description)
+			table.insert(stacks, { k = key, a = amount })
+		end
+		for _, item in ipairs({
+			{ "BossTokens", data.BossTokens, s.currency.BossTokens },
+			{ "SakuraCrystals", data.SakuraCrystals, s.currency.SakuraCrystals },
+			{ "MutationConsumable", data.BossMastery and data.BossMastery.MutationConsumables, nil, "Mutation Consumable" },
+			{ "NitroConsumable", data.RaceRally and data.RaceRally.MutationConsumables, nil, "Nitro Consumable" },
+		}) do
+			local amount, dir, key = item[2] or 0, item[3], "item:" .. item[1]
+			if amount > 0 then
+				add("item", key, amount, dir and dir.DisplayName or item[4], dir and dir.Icon, dir and dir.Rarity)
+				table.insert(stacks, { k = key, a = amount })
+			end
+		end
+		table.sort(stacks, function(a, b) return (a.p or 0) > (b.p or 0) end)
+		while #stacks > 1000 do table.remove(stacks) end
+		local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+		local perSecond = leaderstats and leaderstats:FindFirstChild("Money/s")
+		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = self:_TrackstatDelta(s, current), inventory = stacks, money = data.Money, speed = data.SpeedPower, per_second = perSecond and perSecond.Value or 0 }
+		if s.stopping or os.clock() >= s.uploadAt then s.catalog = catalog end
+		s.summaryText = string.format("Money: %s · Speed: %s · %s/s\nOwned: %s pets · %s eggs · %s gear · %s items\nSession gains: %s pets · %s eggs · %s gear · %s items", FormatCount(data.Money), FormatCount(data.SpeedPower), FormatCount(s.snapshot.per_second), FormatCount(owned.pets), FormatCount(owned.eggs), FormatCount(owned.gear), FormatCount(owned.items), FormatCount(s.gained.pets), FormatCount(s.gained.eggs), FormatCount(s.gained.gear), FormatCount(s.gained.items))
+	end
+
 	function Lib:_TrackstatRead()
 		local s = self._trackstat
+		if s.gameId == STEAL_AN_EGG then return self:_TrackstatReadStealAnEgg() end
 		local current, owned = {}, counts()
 		for _, item in pairs(s.inventory.Container(LocalPlayer):All()) do
 			local kind = item.Class.Name
@@ -10180,21 +10270,7 @@ do
 				owned[metric] += amount
 			end
 		end
-		for id, item in pairs(current) do
-			local gain = s.previous and math.max(0, item.owned - ((s.previous[id] and s.previous[id].owned) or 0)) or 0
-			s.gained[item.metric] += gain
-			s.details[id] = s.details[id] or { name = item.name, kind = item.kind, gained = 0, owned = 0 }
-			s.details[id].gained += gain
-		end
-		local details = {}
-		for id, item in pairs(s.details) do
-			item.owned = current[id] and current[id].owned or 0
-			if item.owned > 0 or item.gained > 0 then table.insert(details, table.clone(item)) end
-		end
-		table.sort(details, function(a, b) return a.kind == b.kind and a.name < b.name or a.kind < b.kind end)
-		while #details > 500 do table.remove(details) end
-		s.previous = current
-		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details }
+		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = self:_TrackstatDelta(s, current) }
 		if s.stopping or os.clock() >= s.uploadAt then s.stacks, s.catalog = self:_TrackstatInventory(s) end
 		s.snapshot.inventory = s.stacks
 		s.summaryText = string.format("Owned: %s items · %s Huge · %s Titanic · %s Gargantuan\nSession gains: %s items · %s Huge · %s Titanic · %s Gargantuan", FormatCount(owned.items), FormatCount(owned.huge), FormatCount(owned.titanic), FormatCount(owned.gargantuan), FormatCount(s.gained.items), FormatCount(s.gained.huge), FormatCount(s.gained.titanic), FormatCount(s.gained.gargantuan))
@@ -10227,12 +10303,13 @@ do
 		local keys = {}
 		for key in pairs(s.catalog) do if not s.known[key] then table.insert(keys, key) end end
 		if #keys > 0 then
-			local ok, missing = self:_TrackstatRPC("trackstat_catalog_missing", { p_keys = keys })
+			local prefix = s.gameId == STEAL_AN_EGG and "trackstats_stealanegg_catalog_" or "trackstat_catalog_"
+			local ok, missing = self:_TrackstatRPC(prefix .. "missing", { p_keys = keys })
 			if not ok then error(missing, 0) end
 			for i = 1, #missing, 300 do
 				local items = {}
 				for j = i, math.min(i + 299, #missing) do table.insert(items, s.catalog[missing[j]]) end
-				local added, reason = self:_TrackstatRPC("trackstat_catalog_add", { p_key = s.key, p_items = items })
+				local added, reason = self:_TrackstatRPC(prefix .. "add", { p_key = s.key, p_items = items })
 				if not added then error(reason, 0) end
 			end
 			for _, key in ipairs(keys) do s.known[key] = true end
@@ -10324,35 +10401,51 @@ do
 		connection:AddButton({ Name = "Copy Website", Callback = function()
 			win:CopyToClipboard("https://seisen.vercel.app/trackstat", "Website link copied")
 		end })
-		s.summary = stats:AddLabel({ Text = "Enable tracking to capture an inventory baseline. Existing inventory is not counted as session gains." })
-		s.toggle = stats:AddToggle({ Name = "Track this account", Flag = "Trackstat_Track", Default = false, Callback = function(enabled)
-			if enabled then
-				if s.busy or game.GameId ~= 3317771874 then
-					s.status:SetText(s.busy and "Connection request is busy; try again shortly" or "This game is not supported yet")
-					task.defer(function() if not s.closed then s.toggle:Set(false) end end)
-					return
+		local function addToggle(section, name, gameId, flag, about)
+			local summary = section:AddLabel({ Text = "Enable tracking to capture an inventory baseline. Existing inventory is not counted as session gains." })
+			local toggle
+			toggle = section:AddToggle({ Name = "Track this account", Flag = flag, Default = false, Callback = function(enabled)
+				if enabled then
+					if s.busy or game.GameId ~= gameId then
+						s.status:SetText(s.busy and "Connection request is busy; try again shortly" or "This toggle is for " .. name .. " only")
+						task.defer(function() if not s.closed then toggle:Set(false) end end)
+						return
+					end
+					local identity = getthreadidentity and getthreadidentity()
+					if setthreadidentity then pcall(setthreadidentity, 2) end
+					local ok = pcall(function()
+						local rs = game.ReplicatedStorage
+						if gameId == STEAL_AN_EGG then
+							s.save, s.assets, s.gears = require(rs.Shared.Save), require(rs.Data.Assets).Directory, require(rs.Data.Gears).Directory
+							s.rarities, s.currency = require(rs.Data.Rarity).Rarities, require(rs.Data.Currency).Directory
+							assert(s.save.IsLoaded())
+						else
+							s.inventory = require(rs.Library.Universal.Inventory)
+						end
+					end)
+					if identity and setthreadidentity then pcall(setthreadidentity, identity) end
+					if not ok then
+						s.status:SetText("Inventory is not ready; try again shortly")
+						task.defer(function() if not s.closed then toggle:Set(false) end end)
+						return
+					end
+					s.gameId, s.summary, s.toggle = gameId, summary, toggle
+					s.previous, s.details, s.gained = nil, {}, counts(gameId)
+					s.snapshot, s.stopping = nil, false
+					s.session, s.sequence, s.uploadAt, s.nextAt = HttpService:GenerateGUID(false), 0, 0, 0
+					s.enabled = true
+					self:_UpdateTrackstat()
+				elseif s.toggle == toggle then
+					s.enabled = false
+					s.stopping, s.nextAt = s.snapshot ~= nil, 0
+					s.status:SetText("Tracking stopped · history kept on website")
 				end
-				local identity = getthreadidentity and getthreadidentity()
-				local ok, inventory = pcall(function() return require(game.ReplicatedStorage.Library.Universal.Inventory) end)
-				if identity and setthreadidentity then pcall(setthreadidentity, identity) end
-				if not ok then
-					s.status:SetText("Inventory is not ready; try again shortly")
-					task.defer(function() if not s.closed then s.toggle:Set(false) end end)
-					return
-				end
-				s.inventory, s.previous, s.details, s.gained = inventory, nil, {}, counts()
-				s.snapshot, s.stopping = nil, false
-				s.session, s.sequence, s.uploadAt, s.nextAt = HttpService:GenerateGUID(false), 0, 0, 0
-				s.enabled = true
-				self:_UpdateTrackstat()
-			else
-				s.enabled = false
-				s.stopping, s.nextAt = s.snapshot ~= nil, 0
-				s.status:SetText("Tracking stopped · history kept on website")
-			end
-		end })
-		stats:AddParagraph({ Title = "What is tracked", Content = "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals." })
-		stats:SetCollapsed(true)
+			end })
+			section:AddParagraph({ Title = "What is tracked", Content = about })
+			section:SetCollapsed(true)
+		end
+		addToggle(stats, "Pet Simulator 99", PET_SIMULATOR_99, "Trackstat_Track", "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
+		addToggle(tab:AddRightSection("Steal an Egg", "egg"), "Steal an Egg", STEAL_AN_EGG, "Trackstat_Track_StealAnEgg", "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
 	end
 end
 
