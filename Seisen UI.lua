@@ -5029,11 +5029,10 @@ function Window:_buildIsland()
 		Position = UDim2.new(0, 5, 0.5, 0),
 		Size = UDim2.fromOffset(ISLAND.Height - 10, ISLAND.Height - 10),
 		BackgroundColor3 = Theme.Accent,
-		BackgroundTransparency = 0.82,
+		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Parent = compact,
 	})
-	Round(orb, 100)
 	local orbSize = IsAsset(self.LogoIcon) and 20 or 16
 	NewIcon(orb, self.LogoIcon, orbSize, Theme.Accent, UDim2.new(0.5, -orbSize / 2, 0.5, -orbSize / 2))
 	Label({
