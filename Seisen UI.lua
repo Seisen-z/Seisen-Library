@@ -5732,7 +5732,7 @@ function Lib:CreateWindow(o)
 		Tween(closeIcon, { ImageColor3 = Theme.Muted }, 0.2)
 	end)
 	close.MouseButton1Click:Connect(function()
-		self:Destroy()
+		Lib:Unload()
 	end)
 
 	self.PageHolder = New("Frame", { Position = UDim2.fromOffset(32, 76), Size = UDim2.new(1, -64, 1, -100), BackgroundTransparency = 1, ClipsDescendants = true, Parent = main })
