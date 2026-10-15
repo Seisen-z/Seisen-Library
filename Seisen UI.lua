@@ -10303,8 +10303,8 @@ do
 		return entries, catalog
 	end
 
-	-- Steal An Egg's icons are private on Roblox's side, so the website cannot load them. The game can: each icon is captured once
-	-- as a small PNG and stored in Supabase storage (existing files are never overwritten), and the website shows that copy.
+	-- Item pictures: some games' icons are private on Roblox's side, so the website cannot load them. The game can: each icon is
+	-- captured once as a small PNG and stored in Supabase storage (existing files are never overwritten), and the website shows that copy.
 	local crcTable
 	local function crc32(data)
 		if not crcTable then
@@ -10341,12 +10341,13 @@ do
 	local imagesUrl = "https://xsygxfeutjcwmqejslbv.supabase.co/storage/v1/object/"
 	function Lib:_TrackstatImages(s)
 		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
+		local folder = s.gameId == STEAL_AN_EGG and "stealanegg" or "petsimulator99"
 		if setthreadidentity then pcall(setthreadidentity, 8) end -- reading a private icon needs the game's own identity
 		for _, item in pairs(s.catalog) do
 			local icon = item.icon
 			if icon ~= "" and not s.imaged[icon] and budget > 0 then
 				s.imaged[icon] = true
-				local ok, found = pcall(req, { Url = imagesUrl .. "public/trackstats-images/stealanegg/" .. icon .. ".png", Method = "GET", Headers = { Range = "bytes=0-0" } })
+				local ok, found = pcall(req, { Url = imagesUrl .. "public/trackstats-images/" .. folder .. "/" .. icon .. ".png", Method = "GET", Headers = { Range = "bytes=0-0" } })
 				if ok and type(found) == "table" and found.StatusCode and found.StatusCode >= 400 then
 					budget -= 1
 					-- some icons never finish loading; run the capture on its own thread and give up after a few seconds
@@ -10359,7 +10360,7 @@ do
 							local png = encodePng(96, buffer.tostring(target:ReadPixelsBuffer(Vector2.zero, target.Size)))
 							source:Destroy()
 							target:Destroy()
-							req({ Url = imagesUrl .. "trackstats-images/stealanegg/" .. icon .. ".png", Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "image/png" }, Body = png })
+							req({ Url = imagesUrl .. "trackstats-images/" .. folder .. "/" .. icon .. ".png", Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "image/png" }, Body = png })
 						end)
 						finished = true
 					end)
@@ -10385,7 +10386,7 @@ do
 			end
 			for _, key in ipairs(keys) do s.known[key] = true end
 		end
-		if s.gameId == STEAL_AN_EGG then self:_TrackstatImages(s) end
+		self:_TrackstatImages(s)
 		s.catalog = nil
 	end
 
