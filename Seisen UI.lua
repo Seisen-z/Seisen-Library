@@ -4224,7 +4224,7 @@ local function MakeGhost(win)
 	local ghost = New("Frame", {
 		AnchorPoint = root.AnchorPoint,
 		Position = root.Position,
-		Size = UDim2.fromOffset(root.AbsoluteSize.X, root.AbsoluteSize.Y),
+		Size = UDim2.fromOffset(win:_shownSize().X, win:_shownSize().Y),
 		BackgroundColor3 = Theme.Accent,
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
@@ -4271,9 +4271,15 @@ local function MakeGhost(win)
 	end
 end
 
+-- What the window really covers on screen (its own size times its UIScale)
+function Window:_shownSize()
+	local size = self.Root.Size
+	return Vector2.new(size.X.Offset, size.Y.Offset) * self.RootScale.Scale
+end
+
 function Window:_clamp(center)
 	local screen = self.Gui.AbsoluteSize
-	local half = self.Root.AbsoluteSize / 2
+	local half = self:_shownSize() / 2
 	return Vector2.new(
 		math.clamp(center.X, half.X, math.max(screen.X - half.X, half.X)),
 		math.clamp(center.Y, half.Y, math.max(screen.Y - half.Y, half.Y))
@@ -4374,21 +4380,29 @@ function Window:_enableDrag(handles)
 			end
 		end)
 	end
+	local function release()
+		pressed = false
+		if ghost then
+			local final = self:_clamp(Vector2.new(ghost.Position.X.Offset, ghost.Position.Y.Offset))
+			Tween(self.Root, { Position = UDim2.fromOffset(final.X, final.Y) }, 0.3)
+			closeGhost()
+			ghost = nil
+		elseif moved then
+			local final = self:_clamp(center())
+			Tween(self.Root, { Position = UDim2.fromOffset(final.X, final.Y) }, 0.3)
+		end
+	end
 	self:_listen(UserInputService.InputEnded, function(input)
 		if IsPress(input) and self._popPanels then
 			for group in pairs(self._popPanels) do group:_popRelease() end
 		end
 		if pressed and IsPress(input) then
-			pressed = false
-			if ghost then
-				local final = self:_clamp(Vector2.new(ghost.Position.X.Offset, ghost.Position.Y.Offset))
-				Tween(self.Root, { Position = UDim2.fromOffset(final.X, final.Y) }, 0.3)
-				closeGhost()
-				ghost = nil
-			elseif moved then
-				local final = self:_clamp(center())
-				Tween(self.Root, { Position = UDim2.fromOffset(final.X, final.Y) }, 0.3)
-			end
+			release()
+		end
+	end)
+	self:_listen(UserInputService.TouchEnded, function()
+		if pressed then
+			release()
 		end
 	end)
 	self:_listen(RunService.RenderStepped, function(dt)
@@ -4399,6 +4413,10 @@ function Window:_enableDrag(handles)
 			self._popLayer.Size = UDim2.fromScale(1 / scale, 1 / scale)
 			self._popLayer.Visible = self.Open and self._dialog == nil
 			for group in pairs(self._popPanels) do group:_popStep() end
+		end
+		if ghost and not pressed then
+			closeGhost()
+			ghost = nil
 		end
 		if not pressed then
 			return
@@ -7011,7 +7029,9 @@ function Window:_setBaseScale(scale)
 	end
 	if viewport.X == 0 or viewport.Y == 0 then return end
 	local size = self.Root.Size
-	self.BaseScale = math.clamp(math.min(1, viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32)) * self._requestedScale, 0.25, 2)
+	-- Phones get a smaller window than desktop so more of the game stays visible
+	local compact = (viewport.X < 900 or UserInputService.TouchEnabled and not UserInputService.MouseEnabled) and 0.8 or 1
+	self.BaseScale = math.clamp(math.min(1, viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32)) * compact * self._requestedScale, 0.25, 2)
 	self.RootScale.Scale = self.BaseScale
 end
 
