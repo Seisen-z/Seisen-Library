@@ -10559,7 +10559,18 @@ do
 		if s.catalog == catalog then s.catalog = nil end
 	end
 
+	function Lib:_TrackstatHeartbeat()
+		local s = self._trackstat
+		if not s or s.closed or s.linking or not s.enabled or not s.registered or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
+		s.presenceBusy, s.presenceAt = true, os.clock() + 15
+		task.spawn(function()
+			self:_TrackstatRPC("trackstat_heartbeat", { p_key = s.key, p_game = tostring(s.gameId) })
+			s.presenceBusy = false
+		end)
+	end
+
 	function Lib:_UpdateTrackstat()
+		self:_TrackstatHeartbeat()
 		local s = self._trackstat
 		if not s or s.closed or s.busy or s.linking or not (s.enabled or s.stopping) or os.clock() < s.nextAt then return end
 		s.busy, s.nextAt = true, os.clock() + 5
