@@ -10132,8 +10132,12 @@ do
 		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
 	end
 
+	local function httpRequest()
+		return syn and syn.request or http and http.request or request or http_request
+	end
+
 	function Lib:_TrackstatRPC(name, args)
-		local req = syn and syn.request or http and http.request or request or http_request
+		local req = httpRequest()
 		if not req then return false, "Executor HTTP is unavailable" end
 		local ok, res = pcall(req, { Url = url .. name, Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode(args) })
 		if not ok or type(res) ~= "table" then return false, "Trackstat request failed; try again" end
@@ -10299,6 +10303,73 @@ do
 		return entries, catalog
 	end
 
+	-- Steal An Egg's icons are private on Roblox's side, so the website cannot load them. The game can: each icon is captured once
+	-- as a small PNG and stored in Supabase storage (existing files are never overwritten), and the website shows that copy.
+	local crcTable
+	local function crc32(data)
+		if not crcTable then
+			crcTable = {}
+			for i = 0, 255 do
+				local c = i
+				for _ = 1, 8 do c = bit32.band(c, 1) == 1 and bit32.bxor(0xEDB88320, bit32.rshift(c, 1)) or bit32.rshift(c, 1) end
+				crcTable[i] = c
+			end
+		end
+		local c = 0xFFFFFFFF
+		for i = 1, #data do c = bit32.bxor(crcTable[bit32.band(bit32.bxor(c, data:byte(i)), 255)], bit32.rshift(c, 8)) end
+		return bit32.bxor(c, 0xFFFFFFFF)
+	end
+	local function adler32(data)
+		local a, b = 1, 0
+		for i = 1, #data do a = (a + data:byte(i)) % 65521; b = (b + a) % 65521 end
+		return b * 65536 + a
+	end
+	local function pngChunk(kind, data)
+		return string.pack(">I4", #data) .. kind .. data .. string.pack(">I4", crc32(kind .. data))
+	end
+	local function encodePng(size, rgba)
+		local rows = {}
+		for y = 0, size - 1 do rows[#rows + 1] = "\0" .. rgba:sub(y * size * 4 + 1, (y + 1) * size * 4) end
+		local raw, blocks, pos = table.concat(rows), {}, 1
+		while pos <= #raw do
+			local len = math.min(65535, #raw - pos + 1)
+			blocks[#blocks + 1] = string.pack("<BI2I2", pos + len > #raw and 1 or 0, len, 65535 - len) .. raw:sub(pos, pos + len - 1)
+			pos += len
+		end
+		return "\137PNG\r\n\26\n" .. pngChunk("IHDR", string.pack(">I4I4BBBBB", size, size, 8, 6, 0, 0, 0)) .. pngChunk("IDAT", "\x78\x01" .. table.concat(blocks) .. string.pack(">I4", adler32(raw))) .. pngChunk("IEND", "")
+	end
+	local imagesUrl = "https://xsygxfeutjcwmqejslbv.supabase.co/storage/v1/object/"
+	function Lib:_TrackstatImages(s)
+		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
+		if setthreadidentity then pcall(setthreadidentity, 8) end -- reading a private icon needs the game's own identity
+		for _, item in pairs(s.catalog) do
+			local icon = item.icon
+			if icon ~= "" and not s.imaged[icon] and budget > 0 then
+				s.imaged[icon] = true
+				local ok, found = pcall(req, { Url = imagesUrl .. "public/trackstats-images/stealanegg/" .. icon .. ".png", Method = "GET", Headers = { Range = "bytes=0-0" } })
+				if ok and type(found) == "table" and found.StatusCode and found.StatusCode >= 400 then
+					budget -= 1
+					-- some icons never finish loading; run the capture on its own thread and give up after a few seconds
+					local finished, started = false, os.clock()
+					task.spawn(function()
+						pcall(function()
+							local source = assets:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. icon))
+							local target = assets:CreateEditableImage({ Size = Vector2.new(96, 96) })
+							target:DrawImageTransformed(Vector2.new(48, 48), Vector2.new(96 / source.Size.X, 96 / source.Size.Y), 0, source, { CombineType = Enum.ImageCombineType.Overwrite })
+							local png = encodePng(96, buffer.tostring(target:ReadPixelsBuffer(Vector2.zero, target.Size)))
+							source:Destroy()
+							target:Destroy()
+							req({ Url = imagesUrl .. "trackstats-images/stealanegg/" .. icon .. ".png", Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "image/png" }, Body = png })
+						end)
+						finished = true
+					end)
+					while not finished and os.clock() - started < 6 do task.wait(0.1) end
+				end
+			end
+		end
+		if identity and setthreadidentity then pcall(setthreadidentity, identity) end
+	end
+
 	function Lib:_TrackstatCatalog(s)
 		local keys = {}
 		for key in pairs(s.catalog) do if not s.known[key] then table.insert(keys, key) end end
@@ -10314,6 +10385,7 @@ do
 			end
 			for _, key in ipairs(keys) do s.known[key] = true end
 		end
+		if s.gameId == STEAL_AN_EGG then self:_TrackstatImages(s) end
 		s.catalog = nil
 	end
 
@@ -10364,7 +10436,7 @@ do
 		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
 		local s = self._trackstat
 		if not s or s.closed then
-			s = { key = saved.key, pending = saved.pending, path = path, enabled = false, busy = false, nextAt = 0, known = {} }
+			s = { key = saved.key, pending = saved.pending, path = path, enabled = false, busy = false, nextAt = 0, known = {}, imaged = {} }
 			self._trackstat = s
 		end
 		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
