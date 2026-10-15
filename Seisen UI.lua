@@ -598,25 +598,53 @@ local function ParentGui(gui, preferred)
 	end
 end
 
-local function ServerTeleport(lowest)
-	local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=" .. (lowest and "Asc" or "Desc") .. "&excludeFullGames=true&limit=100"
-	local ok, data = pcall(function()
-		return HttpService:JSONDecode(game:HttpGet(url))
-	end)
-	if not ok or not data or not data.data then
-		return
+local function ServerTeleport(lowest, options)
+	local pool, cursor = {}, ""
+	for page = 1, options and 3 or 1 do
+		if options and not options.active() then return false end
+		local url = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=" .. (lowest and "Asc" or "Desc") .. "&excludeFullGames=true&limit=100"
+		if cursor ~= "" then url ..= "&cursor=" .. cursor end
+		local ok, data = pcall(function()
+			local req = request or http_request or syn and syn.request
+			return HttpService:JSONDecode(req and (req({ Url = url, Method = "GET" }).Body) or game:HttpGet(url))
+		end)
+		if not ok or type(data) ~= "table" or type(data.data) ~= "table" then break end
+		for _, server in ipairs(data.data) do
+			if server.id ~= game.JobId and server.playing and server.maxPlayers and server.playing < server.maxPlayers then
+				table.insert(pool, server)
+			end
+		end
+		cursor = data.nextPageCursor or ""
+		if cursor == "" then break end
 	end
-	local pool = {}
-	for _, server in ipairs(data.data) do
-		if server.id ~= game.JobId and server.playing < server.maxPlayers then
-			table.insert(pool, server)
+	if #pool == 0 then return false end
+	if not options then
+		local pick = lowest and pool[1] or pool[math.random(1, #pool)]
+		return pcall(TeleportService.TeleportToPlaceInstance, TeleportService, game.PlaceId, pick.id, LocalPlayer)
+	end
+	table.sort(pool, function(a, b) return a.playing < b.playing end)
+	local candidates = {}
+	for _, server in ipairs(pool) do
+		if server.playing + 1 <= options.max then table.insert(candidates, server) end
+	end
+	if #candidates == 0 then
+		for _, server in ipairs(pool) do
+			if server.playing == pool[1].playing then table.insert(candidates, server) end
 		end
 	end
-	if #pool == 0 then
-		return
+	for attempt = 1, math.min(5, #candidates) do
+		if not options.active() then return false end
+		local server = table.remove(candidates, math.random(1, #candidates))
+		options.failed = false
+		if pcall(TeleportService.TeleportToPlaceInstance, TeleportService, game.PlaceId, server.id, LocalPlayer) then
+			local started = os.clock()
+			while options.active() and not options.failed and os.clock() - started < 6 do task.wait(0.25) end
+			if not options.active() then return false end
+			if not options.failed then return true end
+		end
+		task.wait(0.3)
 	end
-	local pick = lowest and pool[1] or pool[math.random(1, #pool)]
-	pcall(TeleportService.TeleportToPlaceInstance, TeleportService, game.PlaceId, pick.id, LocalPlayer)
+	return false
 end
 
 ---------------------------------------------------------------- storage / theme / config
@@ -4220,6 +4248,7 @@ end
 
 -- drag outline (default "Outline" style): a ghost frame follows the cursor, window glides there on release
 local function MakeGhost(win)
+	if win._dragGhost then win._dragGhost:Destroy() end
 	local root = win.Root
 	local ghost = New("Frame", {
 		AnchorPoint = root.AnchorPoint,
@@ -4231,6 +4260,7 @@ local function MakeGhost(win)
 		ZIndex = 40,
 		Parent = win.Gui,
 	})
+	win._dragGhost = ghost
 	Round(ghost, 12)
 	local shown, hidden = {}, {}
 	local function track(obj, showProps, hideProps)
@@ -4262,10 +4292,12 @@ local function MakeGhost(win)
 	end
 	Tween(scale, { Scale = 1 }, 0.25)
 	return ghost, function()
+		if not ghost.Parent then return end
 		for _, h in ipairs(hidden) do
 			Tween(h[1], h[2], 0.2, Enum.EasingStyle.Quad)
 		end
 		task.delay(0.22, function()
+			if win._dragGhost == ghost then win._dragGhost = nil end
 			ghost:Destroy()
 		end)
 	end
@@ -4390,16 +4422,20 @@ end
 function Window:_enableDrag(handles)
 	local pressed, moved = false, false
 	local startMouse, grab, target = Vector2.zero, Vector2.zero, nil
-	local ghost, closeGhost
+	local ghost, closeGhost, dragInput
 	local function mouse()
+		if dragInput and dragInput.UserInputType == Enum.UserInputType.Touch then
+			return Vector2.new(dragInput.Position.X, dragInput.Position.Y) - GuiService:GetGuiInset()
+		end
 		return MousePos()
 	end
 	local function center()
 		return self.Root.AbsolutePosition + self.Root.AbsoluteSize * self.Root.AnchorPoint - self.Gui.AbsolutePosition
 	end
 	for _, handle in ipairs(handles) do
-		handle.InputBegan:Connect(function(input)
-			if IsPress(input) and self.Open and not self._resizeActive then
+		self:_listen(handle.InputBegan, function(input)
+			if IsPress(input) and self.Open and not self._resizeActive and not pressed then
+				dragInput = input
 				pressed, moved = true, false
 				startMouse = mouse()
 				grab = startMouse - center()
@@ -4420,21 +4456,26 @@ function Window:_enableDrag(handles)
 			self._screenPosition = final / self.Gui.AbsoluteSize
 			Tween(self.Root, { Position = UDim2.fromOffset(final.X, final.Y) }, 0.3)
 		end
+		moved, dragInput = false, nil
 	end
 	self:_listen(UserInputService.InputEnded, function(input)
 		if IsPress(input) and self._popPanels then
 			for group in pairs(self._popPanels) do group:_popRelease() end
 		end
-		if pressed and IsPress(input) then
+		if pressed and input == dragInput then
 			release()
 		end
 	end)
-	self:_listen(UserInputService.TouchEnded, function()
-		if pressed then
+	self:_listen(UserInputService.TouchEnded, function(input)
+		if pressed and input == dragInput then
 			release()
 		end
+	end)
+	self:_listen(UserInputService.WindowFocusReleased, function()
+		if pressed then release() end
 	end)
 	self:_listen(RunService.RenderStepped, function(dt)
+		if pressed and (not self.Open or dragInput.UserInputState == Enum.UserInputState.End or dragInput.UserInputState == Enum.UserInputState.Cancel) then release() end
 		if self._resizeStep then self._resizeStep(dt) end
 		if self._popLayer then
 			local scale = math.max(self.RootScale.Scale, 0.05)
@@ -4456,7 +4497,9 @@ function Window:_enableDrag(handles)
 			ghost, closeGhost = MakeGhost(self)
 		end
 		if moved then
-			target = now - grab
+			local shown = self:_shownSize()
+			ghost.Size = UDim2.fromOffset(shown.X, shown.Y)
+			target = self:_clamp(now - grab)
 			local alpha = 1 - math.exp(-dt * 45)
 			local current = Vector2.new(ghost.Position.X.Offset, ghost.Position.Y.Offset)
 			local nextPos = current:Lerp(target, alpha)
@@ -5663,6 +5706,7 @@ function Lib:CreateWindow(o)
 		Connections = {},
 		Open = true,
 		HomeEnabled = o.Home ~= false,
+		ScriptUrl = o.ScriptUrl,
 		SessionStart = os.clock(),
 		FPS = 60,
 		Names = {},
@@ -5809,6 +5853,7 @@ function Lib:CreateWindow(o)
 	self:_listen(RunService.RenderStepped, function()
 		if Lib._usage then Lib:_UpdateUsage() end
 		if Lib._trackstat then Lib:_UpdateTrackstat() end
+		if self._serverHopStep then self._serverHopStep() end
 		frames += 1
 		local now = os.clock()
 		if now - last >= 0.5 then
@@ -8446,9 +8491,56 @@ function Lib:_EnsureBuiltInSection(window)
 	window:AddSidebarDivider(true)
 end
 
+function Window:_buildServerHop(tab)
+	local section = tab:AddRightSection("Server Hop", "shuffle")
+	local status = section:AddLabel({ Text = "Pick a maximum player count, including you." })
+	local state = { max = 2, auto = false, busy = false, nextAt = 0 }
+	local autoExecute, armed = true, false
+	self:_listen(TeleportService.TeleportInitFailed, function(player)
+		if player == LocalPlayer then state.failed = true end
+	end)
+	local function hop(automatic)
+		if state.busy or not self.Gui.Parent then return end
+		if #Players:GetPlayers() <= state.max then status:SetText("This server is within your player limit."); return end
+		state.busy = true
+		state.active = function() return self.Gui.Parent ~= nil and (not automatic or state.auto) end
+		status:SetText("Searching for a quieter server...")
+		task.spawn(function()
+			local moved = ServerTeleport(true, state)
+			state.busy, state.nextAt = false, os.clock() + 5
+			if self.Gui.Parent then status:SetText(moved and "Teleporting..." or "No hop completed. Try again shortly.") end
+		end)
+	end
+	section:AddButton({ Name = "Hop Server Now", Tooltip = "Find a quieter server when this server exceeds your player limit.", Callback = function() hop(false) end })
+	section:AddDropdown({ Name = "Max Players", Flag = "BuiltIn_HopMaxPlayers", Options = { "1", "2", "3", "4", "5" }, Default = "2", Multi = false,
+		Tooltip = "Maximum players in the destination, including you. Falls back to the quietest available server.",
+		Callback = function(value) state.max = tonumber(value) or 2; state.nextAt = 0 end })
+	section:AddToggle({ Name = "Player Check Hop", Flag = "BuiltIn_PlayerCheckHop", Default = false,
+		Tooltip = "Keep hopping when the server has more players than your selected maximum.",
+		Callback = function(value) state.auto = value; state.nextAt = 0; if not value then status:SetText("Auto hop stopped.") end end })
+	section:AddToggle({ Name = "Auto Execute On Teleport", Flag = "BuiltIn_AutoExecute", Default = true,
+		Tooltip = "Run this game's script again after teleporting. Requires your executor's teleport queue.",
+		Callback = function(value) autoExecute = value end })
+	self._serverHopStep = function()
+		if not state.auto or state.busy or os.clock() < state.nextAt then return end
+		state.nextAt = os.clock() + 3
+		if #Players:GetPlayers() > state.max then hop(true) else status:SetText("Good server found. Waiting...") end
+	end
+	self:_listen(LocalPlayer.OnTeleport, function(teleportState)
+		if not autoExecute or armed or not self.Gui.Parent or (teleportState ~= Enum.TeleportState.Started and teleportState ~= Enum.TeleportState.InProgress) then return end
+		local queue = queue_on_teleport or queueonteleport
+		if type(queue) ~= "function" or type(self.ScriptUrl) ~= "string" or self.ScriptUrl == "" then
+			Lib:Notify({ Title = "Auto Execute", Content = type(queue) ~= "function" and "Teleport queue is unavailable in this executor." or "No script URL is available for this game.", Type = "warning" })
+			return
+		end
+		armed = pcall(queue, ("loadstring(game:HttpGet(%q))()"):format(self.ScriptUrl))
+	end)
+end
+
 function Library:_BuildConfigTab(window)
     self:_EnsureBuiltInSection(window)
     local configTab = window:AddTab("Performance", "activity", true)
+    window:_buildServerHop(configTab)
     local configUI = configTab:AddLeftSection("UI Settings", "settings")
     local configLeft = configTab:AddLeftSection("Character", "person-standing")
     local configRight = configTab:AddRightSection("Misc", "sparkles")
@@ -9843,6 +9935,7 @@ function Library:_BuildGamesTab(window)
         local ok,  Games        = pcall(function() return loadstring(game:HttpGet("https://raw.githubusercontent.com/Mentos4/roblox/main/gamelist.lua"))()       end)
         local ok2, Discontinued = pcall(function() return loadstring(game:HttpGet("https://raw.githubusercontent.com/Mentos4/roblox/main/discontinued.lua"))()  end)
         Games        = ok  and Games        or {}
+        if not window.ScriptUrl or window.ScriptUrl == "" then window.ScriptUrl = Games[tostring(game.GameId)] or Games[game.GameId] end
         Discontinued = ok2 and Discontinued or {}
 
         local continuedList, discontinuedList = {}, {}
@@ -10411,11 +10504,12 @@ do
 		return "\137PNG\r\n\26\n" .. pngChunk("IHDR", string.pack(">I4I4BBBBB", size, size, 8, 6, 0, 0, 0)) .. pngChunk("IDAT", "\x78\x01" .. table.concat(blocks) .. string.pack(">I4", adler32(raw))) .. pngChunk("IEND", "")
 	end
 	local imagesUrl = "https://xsygxfeutjcwmqejslbv.supabase.co/storage/v1/object/"
-	function Lib:_TrackstatImages(s)
+	function Lib:_TrackstatImages(s, catalog)
 		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
 		local folder = s.gameId == STEAL_AN_EGG and "stealanegg" or "petsimulator99"
 		if setthreadidentity then pcall(setthreadidentity, 8) end -- reading a private icon needs the game's own identity
-		for _, item in pairs(s.catalog) do
+		for _, item in pairs(catalog) do
+			if s.closed then break end
 			local icon = item.icon
 			if icon ~= "" and not s.imaged[icon] and budget > 0 then
 				s.imaged[icon] = true
@@ -10444,22 +10538,25 @@ do
 	end
 
 	function Lib:_TrackstatCatalog(s)
+		local catalog = s.catalog
 		local keys = {}
-		for key in pairs(s.catalog) do if not s.known[key] then table.insert(keys, key) end end
+		for key in pairs(catalog) do if not s.known[key] then table.insert(keys, key) end end
 		if #keys > 0 then
 			local prefix = s.gameId == STEAL_AN_EGG and "trackstats_stealanegg_catalog_" or "trackstat_catalog_"
 			local ok, missing = self:_TrackstatRPC(prefix .. "missing", { p_keys = keys })
 			if not ok then error(missing, 0) end
+			if s.closed then return end
 			for i = 1, #missing, 300 do
+				if s.closed then return end
 				local items = {}
-				for j = i, math.min(i + 299, #missing) do table.insert(items, s.catalog[missing[j]]) end
+				for j = i, math.min(i + 299, #missing) do table.insert(items, catalog[missing[j]]) end
 				local added, reason = self:_TrackstatRPC(prefix .. "add", { p_key = s.key, p_items = items })
 				if not added then error(reason, 0) end
 			end
 			for _, key in ipairs(keys) do s.known[key] = true end
 		end
-		self:_TrackstatImages(s)
-		s.catalog = nil
+		self:_TrackstatImages(s, catalog)
+		if s.catalog == catalog then s.catalog = nil end
 	end
 
 	function Lib:_UpdateTrackstat()
@@ -10481,11 +10578,17 @@ do
 					s.summary:SetText(s.summaryText)
 				end
 				if s.snapshot and (s.stopping or os.clock() >= s.uploadAt) then
-					if s.catalog then self:_TrackstatCatalog(s) end
 					local sent, reason = self:_TrackstatSend(s)
 					s.stopping = false
 					if not sent then error(reason, 0) end
 					s.uploadAt = os.clock() + 15
+					if s.catalog and not s.catalogBusy then
+						s.catalogBusy = true
+						task.spawn(function()
+							if not s.closed then pcall(self._TrackstatCatalog, self, s) end
+							s.catalogBusy = false
+						end)
+					end
 					if not s.closed then s.status:SetText((s.enabled and "Tracking" or "Stopped") .. " · synced " .. os.date("%X")) end
 				end
 			end)
