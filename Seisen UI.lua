@@ -5636,6 +5636,8 @@ function Lib:CreateWindow(o)
 	Stroke(root, Theme.Stroke)
 	self.Root = root
 	self.RootScale = New("UIScale", { Parent = root })
+	self:_setBaseScale(o.Scale or Lib._baseScale or 1)
+	self:_listen(root:GetPropertyChangedSignal("Size"), function() self:_setBaseScale() end)
 	-- Position uses offsets so the drag/clamp math stays in pixels
 	task.defer(function()
 		local c = root.AbsolutePosition + root.AbsoluteSize / 2 - gui.AbsolutePosition
@@ -5728,6 +5730,7 @@ function Lib:CreateWindow(o)
 	List(self.Toasts, 4).VerticalAlignment = Enum.VerticalAlignment.Bottom
 	self.NotifyOrder, self.ToastList, self.MaxNotifications = 0, {}, o.MaxNotifications or 4
 	self:_listen(gui:GetPropertyChangedSignal("AbsoluteSize"), function()
+		self:_setBaseScale()
 		self.Toasts.Size = UDim2.new(0, math.min(280, gui.AbsoluteSize.X - 40), 1, -40)
 	end)
 
@@ -6986,8 +6989,15 @@ function Window:AddTab(name, iconName, isBuiltIn)
 end
 
 function Window:_setBaseScale(scale)
-	self.BaseScale = scale
-	self.RootScale.Scale = scale
+	self._requestedScale = scale or self._requestedScale or 1
+	local viewport = self.Gui.AbsoluteSize
+	if (viewport.X == 0 or viewport.Y == 0) and workspace.CurrentCamera then
+		viewport = workspace.CurrentCamera.ViewportSize
+	end
+	if viewport.X == 0 or viewport.Y == 0 then return end
+	local size = self.Root.Size
+	self.BaseScale = math.clamp(math.min(1, viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32)) * self._requestedScale, 0.25, 2)
+	self.RootScale.Scale = self.BaseScale
 end
 
 function Window:SetScale(scale)
