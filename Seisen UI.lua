@@ -4280,6 +4280,18 @@ local function CompactFactor(gui)
 	return (viewport.X < 900 or UserInputService.TouchEnabled and not UserInputService.MouseEnabled) and 0.8 or 1
 end
 
+-- When the screen itself is resized (a windowed emulator or clone), the window keeps its place relative to the screen
+-- (a centred window stays centred) instead of staying at the same pixel spot
+function Window:_followScreen()
+	local screen, last, root = self.Gui.AbsoluteSize, self._lastScreen, self.Root
+	self._lastScreen = screen
+	if not last or last.X == 0 or last.Y == 0 or screen.X == 0 or screen.Y == 0 or self._resizeActive or root.Position.X.Scale ~= 0 or root.Position.Y.Scale ~= 0 then
+		return
+	end
+	local center = self:_clamp(Vector2.new(root.Position.X.Offset, root.Position.Y.Offset) * (screen / last))
+	root.Position = UDim2.fromOffset(center.X, center.Y)
+end
+
 -- What the window really covers on screen (its own size times its UIScale)
 function Window:_shownSize()
 	local size = self.Root.Size
@@ -5210,6 +5222,10 @@ function Window:_buildIsland()
 			island.Position = UDim2.fromOffset(target.X, target.Y)
 		end
 	end
+	-- the screen was resized: put the pill back where its anchor now is (top-centre unless dragged)
+	self._islandReplace = function()
+		place((sizeOf(state)))
+	end
 	local groups = { Compact = compact, Expanded = expanded }
 	local function go(name, instant)
 		local changed = name ~= state
@@ -5782,6 +5798,10 @@ function Lib:CreateWindow(o)
 	self.NotifyOrder, self.ToastList, self.MaxNotifications = 0, {}, o.MaxNotifications or 4
 	self:_listen(gui:GetPropertyChangedSignal("AbsoluteSize"), function()
 		self:_setBaseScale()
+		self:_followScreen()
+		if self._islandReplace then
+			self._islandReplace()
+		end
 		self.Toasts.Size = UDim2.new(0, math.min(280, gui.AbsoluteSize.X - 40), 1, -40)
 	end)
 
