@@ -10320,7 +10320,11 @@ do
 			s.busy = false
 			if not s.closed then s.status:SetText(ok and "Key reset · copy the new key to reconnect your website" or tostring(err)) end
 		end })
-		connection:AddParagraph({ Title = "Website", Content = "seisen.vercel.app/trackstat\nKeep your key private. Reset revokes the old key but keeps history." })
+		connection:AddParagraph({ Title = "Website", Content = "Keep your key private. Reset revokes the old key but keeps history." })
+		connection:AddButton({ Name = "seisen.vercel.app/trackstat", Callback = function()
+			local copy = setclipboard or toclipboard
+			s.status:SetText(copy and pcall(copy, "https://seisen.vercel.app/trackstat") and "Website link copied · paste it in your browser" or "Executor clipboard is unavailable")
+		end })
 		s.summary = stats:AddLabel({ Text = "Enable tracking to capture an inventory baseline. Existing inventory is not counted as session gains." })
 		s.toggle = stats:AddToggle({ Name = "Track this account", Flag = "Trackstat_Track", Default = false, Callback = function(enabled)
 			if enabled then
