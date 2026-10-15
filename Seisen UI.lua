@@ -7102,6 +7102,7 @@ function Window:ShowChangelog(entries)
 			table.insert(lines, FormatChangeLine(change))
 		end
 		section:AddParagraph({ Content = table.concat(lines, "\n") })
+		if i > 1 then section:SetCollapsed(true) end
 	end
 	self._changelogTab = tab
 end
@@ -10278,6 +10279,7 @@ do
 
 	function Lib:_BuildTrackstatTab(win)
 		local tab = win:AddTab("Trackstat", "activity", true)
+		tab._entry.Button.LayoutOrder = 0 -- right below Home (-2) and Cloud (-1)
 		local connection = tab:AddLeftSection("Account connection", "link")
 		local stats = tab:AddRightSection("Pet Simulator 99", "chart-no-axes-combined")
 		local path = ROOT_FOLDER .. "/Trackstat/" .. tostring(LocalPlayer.UserId) .. ".json"
@@ -10347,6 +10349,7 @@ do
 			end
 		end })
 		stats:AddParagraph({ Title = "What is tracked", Content = "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals." })
+		stats:SetCollapsed(true)
 	end
 end
 
