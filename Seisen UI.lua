@@ -5325,6 +5325,10 @@ function Window:_buildIsland()
 end
 
 local function MorphGhost(win, pos, size, radius)
+	-- a rapid minimize/restore skips the old ghost's cleanup, so drop any leftover before making the next
+	if win._ghost then
+		win._ghost:Destroy()
+	end
 	local ghost = New("Frame", {
 		Position = UDim2.fromOffset(pos.X, pos.Y),
 		Size = UDim2.fromOffset(size.X, size.Y),
@@ -5334,6 +5338,7 @@ local function MorphGhost(win, pos, size, radius)
 		ZIndex = 29,
 		Parent = win.Gui,
 	})
+	win._ghost = ghost
 	local corner = Round(ghost, radius)
 	local stroke = Stroke(ghost, Theme.Stroke, 1, 1)
 	return ghost, corner, stroke
