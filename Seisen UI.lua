@@ -4280,15 +4280,11 @@ local function CompactFactor(gui)
 	return (viewport.X < 900 or UserInputService.TouchEnabled and not UserInputService.MouseEnabled) and 0.8 or 1
 end
 
--- When the screen itself is resized (a windowed emulator or clone), the window keeps its place relative to the screen
--- (a centred window stays centred) instead of staying at the same pixel spot
+-- Keep the requested relative centre even when a smaller screen temporarily clamps it.
 function Window:_followScreen()
-	local screen, last, root = self.Gui.AbsoluteSize, self._lastScreen, self.Root
-	self._lastScreen = screen
-	if not last or last.X == 0 or last.Y == 0 or screen.X == 0 or screen.Y == 0 or self._resizeActive or root.Position.X.Scale ~= 0 or root.Position.Y.Scale ~= 0 then
-		return
-	end
-	local center = self:_clamp(Vector2.new(root.Position.X.Offset, root.Position.Y.Offset) * (screen / last))
+	local screen, root = self.Gui.AbsoluteSize, self.Root
+	if screen.X <= 0 or screen.Y <= 0 or self._resizeActive then return end
+	local center = self:_clamp((self._screenPosition or Vector2.new(0.5, 0.5)) * screen)
 	root.Position = UDim2.fromOffset(center.X, center.Y)
 end
 
@@ -4383,6 +4379,9 @@ function Window:_enableResize(minSize, maxSize)
 			root.AnchorPoint = Vector2.new(0.5, 0.5)
 			center = self:_clamp(center)
 			root.Position = UDim2.fromOffset(center.X, center.Y)
+			if self.Gui.AbsoluteSize.X > 0 and self.Gui.AbsoluteSize.Y > 0 then
+				self._screenPosition = center / self.Gui.AbsoluteSize
+			end
 			self._resizeActive = false
 		end
 	end
@@ -4409,13 +4408,16 @@ function Window:_enableDrag(handles)
 	end
 	local function release()
 		pressed = false
+		local final
 		if ghost then
-			local final = self:_clamp(Vector2.new(ghost.Position.X.Offset, ghost.Position.Y.Offset))
-			Tween(self.Root, { Position = UDim2.fromOffset(final.X, final.Y) }, 0.3)
+			final = self:_clamp(Vector2.new(ghost.Position.X.Offset, ghost.Position.Y.Offset))
 			closeGhost()
 			ghost = nil
 		elseif moved then
-			local final = self:_clamp(center())
+			final = self:_clamp(center())
+		end
+		if final and self.Gui.AbsoluteSize.X > 0 and self.Gui.AbsoluteSize.Y > 0 then
+			self._screenPosition = final / self.Gui.AbsoluteSize
 			Tween(self.Root, { Position = UDim2.fromOffset(final.X, final.Y) }, 0.3)
 		end
 	end
@@ -5704,11 +5706,8 @@ function Lib:CreateWindow(o)
 	self.RootScale = New("UIScale", { Parent = root })
 	self:_setBaseScale(o.Scale or Lib._baseScale or 1)
 	self:_listen(root:GetPropertyChangedSignal("Size"), function() self:_setBaseScale() end)
-	-- Position uses offsets so the drag/clamp math stays in pixels
-	task.defer(function()
-		local c = root.AbsolutePosition + root.AbsoluteSize / 2 - gui.AbsolutePosition
-		root.Position = UDim2.fromOffset(c.X, c.Y)
-	end)
+	-- Position uses offsets so the drag/clamp math stays in pixels.
+	task.defer(function() self:_followScreen() end)
 
 	-- sidebar
 	local sidebar = New("Frame", { Size = UDim2.new(0, 188, 1, 0), BackgroundColor3 = Theme.Surface, BorderSizePixel = 0, Parent = root })
@@ -7069,7 +7068,8 @@ function Window:_setBaseScale(scale)
 	end
 	if viewport.X == 0 or viewport.Y == 0 then return end
 	local size = self.Root.Size
-	self.BaseScale = math.clamp(math.min(1, viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32)) * CompactFactor(self.Gui) * self._requestedScale, 0.25, 2)
+	local fit = math.min(viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32))
+	self.BaseScale = math.min(fit, math.clamp(math.min(1, fit) * CompactFactor(self.Gui) * self._requestedScale, 0.25, 2))
 	self.RootScale.Scale = self.BaseScale
 end
 
@@ -10316,6 +10316,19 @@ do
 
 	function Lib:_TrackstatRead()
 		local s = self._trackstat
+		if not s.session then
+			if setthreadidentity then pcall(setthreadidentity, 2) end
+			local rs = game.ReplicatedStorage
+			if s.gameId == STEAL_AN_EGG then
+				s.save, s.assets, s.gears = require(rs.Shared.Save), require(rs.Data.Assets).Directory, require(rs.Data.Gears).Directory
+				s.rarities, s.currency = require(rs.Data.Rarity).Rarities, require(rs.Data.Currency).Directory
+				assert(s.save.IsLoaded(), "Inventory is not ready; retrying shortly")
+			else
+				s.inventory = require(rs.Library.Universal.Inventory)
+			end
+			s.previous, s.details, s.gained = nil, {}, counts(s.gameId)
+			s.session, s.sequence, s.uploadAt = HttpService:GenerateGUID(false), 0, 0
+		end
 		if s.gameId == STEAL_AN_EGG then return self:_TrackstatReadStealAnEgg() end
 		local current, owned = {}, counts()
 		for _, item in pairs(s.inventory.Container(LocalPlayer):All()) do
@@ -10451,7 +10464,7 @@ do
 
 	function Lib:_UpdateTrackstat()
 		local s = self._trackstat
-		if not s or s.closed or s.busy or not (s.enabled or s.stopping) or os.clock() < s.nextAt then return end
+		if not s or s.closed or s.busy or s.linking or not (s.enabled or s.stopping) or os.clock() < s.nextAt then return end
 		s.busy, s.nextAt = true, os.clock() + 5
 		task.spawn(function()
 			local ok, err = pcall(function()
@@ -10472,7 +10485,7 @@ do
 					local sent, reason = self:_TrackstatSend(s)
 					s.stopping = false
 					if not sent then error(reason, 0) end
-					s.uploadAt = os.clock() + 30
+					s.uploadAt = os.clock() + 15
 					if not s.closed then s.status:SetText((s.enabled and "Tracking" or "Stopped") .. " · synced " .. os.date("%X")) end
 				end
 			end)
@@ -10528,11 +10541,11 @@ do
 		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
 		local s = self._trackstat
 		if not s or s.closed then
-			s = { key = saved.key, pending = saved.pending, path = path, enabled = false, busy = false, nextAt = 0, known = {}, imaged = {} }
+			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == STEAL_AN_EGG, busy = false, nextAt = 0, known = {}, imaged = {} }
 			self._trackstat = s
 		end
 		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
-		s.status = connection:AddLabel({ Text = "Ready · tracking is off" })
+		s.status = connection:AddLabel({ Text = s.enabled and "Detecting game - tracking starts automatically" or "This game is not supported by Trackstat" })
 		connection:AddLabel({ Text = fresh and "Looking for your existing history…" or self:_TrackstatSave() and "Key saved for this Roblox account on this device." or "No file storage: copy your key before closing this session." })
 		connection:AddButton({ Name = "Copy connection key", Callback = function()
 			if s.busy or s.linking then return end
@@ -10567,51 +10580,14 @@ do
 		end })
 		s.skipLink = connection:AddButton({ Name = "Start a new history instead", Callback = function() s.linking = false end })
 		s.skipLink:SetVisible(false)
-		local function addToggle(section, name, gameId, flag, about)
-			local summary = section:AddLabel({ Text = "Enable tracking to capture an inventory baseline. Existing inventory is not counted as session gains." })
-			local toggle
-			toggle = section:AddToggle({ Name = "Track this account", Flag = flag, Default = false, Callback = function(enabled)
-				if enabled then
-					if s.busy or s.linking or game.GameId ~= gameId then
-						s.status:SetText(s.linking and "Waiting for this device to be approved on the website" or s.busy and "Connection request is busy; try again shortly" or "This toggle is for " .. name .. " only")
-						task.defer(function() if not s.closed then toggle:Set(false) end end)
-						return
-					end
-					local identity = getthreadidentity and getthreadidentity()
-					if setthreadidentity then pcall(setthreadidentity, 2) end
-					local ok = pcall(function()
-						local rs = game.ReplicatedStorage
-						if gameId == STEAL_AN_EGG then
-							s.save, s.assets, s.gears = require(rs.Shared.Save), require(rs.Data.Assets).Directory, require(rs.Data.Gears).Directory
-							s.rarities, s.currency = require(rs.Data.Rarity).Rarities, require(rs.Data.Currency).Directory
-							assert(s.save.IsLoaded())
-						else
-							s.inventory = require(rs.Library.Universal.Inventory)
-						end
-					end)
-					if identity and setthreadidentity then pcall(setthreadidentity, identity) end
-					if not ok then
-						s.status:SetText("Inventory is not ready; try again shortly")
-						task.defer(function() if not s.closed then toggle:Set(false) end end)
-						return
-					end
-					s.gameId, s.summary, s.toggle = gameId, summary, toggle
-					s.previous, s.details, s.gained = nil, {}, counts(gameId)
-					s.snapshot, s.stopping = nil, false
-					s.session, s.sequence, s.uploadAt, s.nextAt = HttpService:GenerateGUID(false), 0, 0, 0
-					s.enabled = true
-					self:_UpdateTrackstat()
-				elseif s.toggle == toggle then
-					s.enabled = false
-					s.stopping, s.nextAt = s.snapshot ~= nil, 0
-					s.status:SetText("Tracking stopped · history kept on website")
-				end
-			end })
+		local function addGame(section, gameId, about)
+			local summary = section:AddLabel({ Text = game.GameId == gameId and "Tracks automatically in this game. Existing inventory is not counted as session gains." or "Not playing this game." })
+			if game.GameId == gameId then s.summary = summary end
 			section:AddParagraph({ Title = "What is tracked", Content = about })
 			section:SetCollapsed(true)
 		end
-		addToggle(stats, "Pet Simulator 99", PET_SIMULATOR_99, "Trackstat_Track", "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
-		addToggle(tab:AddRightSection("Steal an Egg", "egg"), "Steal an Egg", STEAL_AN_EGG, "Trackstat_Track_StealAnEgg", "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
+		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 15 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
+		addGame(tab:AddRightSection("Steal an Egg", "egg"), STEAL_AN_EGG, "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 15 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
 		if fresh then self:_TrackstatLink(s) end
 	end
 end
