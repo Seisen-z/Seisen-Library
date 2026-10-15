@@ -1,4 +1,19 @@
-# SeisenUI
+# Seisen UI
+
+## Current library
+
+The new library is **`Seisen UI.lua`**. The existing `SeisenUI_New.lua` is unchanged.
+
+```lua
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/Seisen-z/Seisen-Library/main/Seisen%20UI.lua"))()
+```
+
+Keep your existing `Folder` value and control flags when switching scripts so the Manager finds the same saved configurations and themes. The new Manager reads the old Manager's `objects` config format and legacy theme color fields. Its layout and some options differ; the old flat `SeisenConfig_<name>.json` API path is not the new Manager path. New theme files use the new color schema.
+
+## Legacy documentation
+
+The examples below describe the older library files.
+
 
 <p align="center">
   <strong>A modern, feature-rich UI library for Roblox</strong>
