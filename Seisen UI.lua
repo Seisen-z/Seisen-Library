@@ -10547,31 +10547,38 @@ do
 	function Lib:_TrackstatImages(s, catalog)
 		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
 		local folder = s.gameId == STEAL_AN_EGG and "stealanegg" or "petsimulator99"
-		if setthreadidentity then pcall(setthreadidentity, 8) end -- reading a private icon needs the game's own identity
+		local icons = {}
+		for _, item in pairs(catalog) do if item.icon ~= "" and not s.imaged[item.icon] then table.insert(icons, item.icon) end end
+		if #icons == 0 or s.closed then return end
+		local checked, stored = self:_TrackstatRPC("trackstat_image_manifest", { p_game = folder, p_icons = icons })
+		if not checked then return end
+		for _, icon in ipairs(stored) do s.imaged[icon] = true end
+		if setthreadidentity then pcall(setthreadidentity, 8) end
 		for _, item in pairs(catalog) do
 			if s.closed then break end
 			local icon = item.icon
 			if icon ~= "" and not s.imaged[icon] and budget > 0 then
+				budget -= 1
 				s.imaged[icon] = true
-				local ok, found = pcall(req, { Url = imagesUrl .. "public/trackstats-images/" .. folder .. "/" .. icon .. ".png", Method = "GET", Headers = { Range = "bytes=0-0" } })
-				if ok and type(found) == "table" and found.StatusCode and found.StatusCode >= 400 then
-					budget -= 1
-					-- some icons never finish loading; run the capture on its own thread and give up after a few seconds
-					local finished, started = false, os.clock()
-					task.spawn(function()
-						pcall(function()
-							local source = assets:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. icon))
-							local target = assets:CreateEditableImage({ Size = Vector2.new(96, 96) })
-							target:DrawImageTransformed(Vector2.new(48, 48), Vector2.new(96 / source.Size.X, 96 / source.Size.Y), 0, source, { CombineType = Enum.ImageCombineType.Overwrite })
-							local png = encodePng(96, buffer.tostring(target:ReadPixelsBuffer(Vector2.zero, target.Size)))
-							source:Destroy()
-							target:Destroy()
-							req({ Url = imagesUrl .. "trackstats-images/" .. folder .. "/" .. icon .. ".png", Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "image/png" }, Body = png })
-						end)
-						finished = true
+				local finished, started = false, os.clock()
+				task.spawn(function()
+					local success = false
+					pcall(function()
+						local source = assets:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. icon))
+						local target = assets:CreateEditableImage({ Size = Vector2.new(96, 96) })
+						target:DrawImageTransformed(Vector2.new(48, 48), Vector2.new(96 / source.Size.X, 96 / source.Size.Y), 0, source, { CombineType = Enum.ImageCombineType.Overwrite })
+						local png = encodePng(96, buffer.tostring(target:ReadPixelsBuffer(Vector2.zero, target.Size)))
+						source:Destroy()
+						target:Destroy()
+						if s.closed then return end
+						local result = req({ Url = imagesUrl .. "trackstats-images/" .. folder .. "/" .. icon .. ".png", Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "image/png" }, Body = png })
+						success = type(result) == "table" and result.StatusCode and (result.StatusCode >= 200 and result.StatusCode < 300 or result.StatusCode == 409)
 					end)
-					while not finished and os.clock() - started < 6 do task.wait(0.1) end
-				end
+					s.imaged[icon] = success or nil
+					finished = true
+				end)
+				while not finished and os.clock() - started < 6 do task.wait(0.1) end
+				if not finished then s.imaged[icon] = nil end
 			end
 		end
 		if identity and setthreadidentity then pcall(setthreadidentity, identity) end
@@ -10611,7 +10618,10 @@ do
 					if attempt < 3 then task.wait(1) end
 				end
 			end
-			if s.snapshot and not s.busy then self:_TrackstatSend(s) end
+			if s.snapshot and not s.busy then
+				local sent, _, retry = self:_TrackstatSend(s)
+				if not sent and retry then task.wait(retry); self:_TrackstatSend(s) end
+			end
 		end)
 	end
 
@@ -10669,7 +10679,12 @@ do
 
 	function Lib:_TrackstatSend(s)
 		s.sequence += 1
-		return self:_TrackstatRPC("trackstat_push", { p_key = s.key, p_session = s.session, p_sequence = s.sequence, p_game = tostring(game.GameId), p_snapshot = s.snapshot })
+		local ok, data = self:_TrackstatRPC("trackstat_push", { p_key = s.key, p_session = s.session, p_sequence = s.sequence, p_game = tostring(game.GameId), p_snapshot = s.snapshot })
+		if ok and type(data) == "table" then
+			if data.expired then s.session = nil; return false, "Starting a fresh session after history cleanup" end
+			if data.rateLimited then return false, "Sync rate limited; retrying shortly", math.clamp(tonumber(data.retryAfter) or 15, 1, 15) end
+		end
+		return ok, data
 	end
 
 	-- A new device for a Roblox account that already has a history asks to join it; the owner approves once on the website,
