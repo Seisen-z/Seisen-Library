@@ -5720,7 +5720,7 @@ function Lib:CreateWindow(o)
 	Lib.FolderName = o.Folder
 	self:_applyDefaultTheme()
 
-	local gui = New("ScreenGui", { Name = "SeisenUI_" .. self.Title, ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true })
+	local gui = New("ScreenGui", { Name = "SeisenUI_" .. self.Title, ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 1000000 })
 	pcall(function()
 		if syn and syn.protect_gui then
 			syn.protect_gui(gui)
@@ -6108,7 +6108,7 @@ local function NotifyHost()
 		return Lib._notifyHost
 	end
 	SweepOrphans()
-	local gui = New("ScreenGui", { Name = "SeisenNotify", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 10 })
+	local gui = New("ScreenGui", { Name = "SeisenNotify", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 1000010 })
 	ParentGui(gui)
 	local toasts = New("Frame", { Name = "Notifications", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -20, 1, -20), Size = UDim2.new(0, 280, 1, -40), BackgroundTransparency = 1, ZIndex = 50, Parent = gui })
 	New("UIScale", { Scale = CompactFactor(gui), Parent = toasts })
@@ -7998,7 +7998,7 @@ function Lib:CreateWidget(o)
 			self._widgetGui:Destroy()
 		end)
 	end
-	local gui = New("ScreenGui", { Name = "SeisenWidget", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 20, Enabled = true })
+	local gui = New("ScreenGui", { Name = "SeisenWidget", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 1000020, Enabled = true })
 	ParentGui(gui)
 	self._widgetGui = gui
 	local frame = New("Frame", { Position = UDim2.fromOffset(12, 12), Size = UDim2.fromOffset(170, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundColor3 = Theme.Surface2, BackgroundTransparency = 0.1, BorderSizePixel = 0, Parent = gui })
@@ -8073,7 +8073,7 @@ end
 
 -- on-screen up/down buttons for mobile fly
 function Lib:CreateFlyPad(onUp, onDown)
-	local gui = New("ScreenGui", { Name = "SeisenFlyPad", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 20 })
+	local gui = New("ScreenGui", { Name = "SeisenFlyPad", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 1000020 })
 	ParentGui(gui)
 	local function pad(text, y, fn)
 		local b = New("TextButton", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -24, 1, y), Size = UDim2.fromOffset(56, 56), BackgroundColor3 = Theme.Surface2, BackgroundTransparency = 0.2, Text = text, TextColor3 = Theme.Text, TextSize = 14, FontFace = Fonts.Bold, AutoButtonColor = false, Parent = gui })
