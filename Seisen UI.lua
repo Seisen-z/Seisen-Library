@@ -12,6 +12,10 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local LocalPlayer = Players.LocalPlayer
 
 local Lib = { Flags = {}, Windows = {} }
+-- Game functions can silently drop the calling thread's UI access while its identity still reads the same; reapplying the identity restores it
+function Lib._fixIdentity()
+	if getthreadidentity and setthreadidentity then pcall(setthreadidentity, getthreadidentity()) end
+end
 
 local Theme = {
 	Background = Color3.fromRGB(22, 22, 22),
@@ -403,7 +407,11 @@ local function New(class, props)
 			obj[k] = v
 		end
 	end
-	obj.Parent = props and props.Parent
+	local parent = props and props.Parent
+	if not pcall(function() obj.Parent = parent end) then
+		Lib._fixIdentity()
+		obj.Parent = parent
+	end
 	return obj
 end
 
@@ -534,6 +542,7 @@ local ControlAliases = {
 local function Safe(fn, ...)
 	if type(fn) == "function" then
 		local ok, err = pcall(fn, ...)
+		Lib._fixIdentity()
 		if not ok then
 			warn("[Seisen UI] callback error: " .. tostring(err))
 		end
@@ -2321,6 +2330,7 @@ function Container:Dropdown(o)
 		end
 	end
 	function handle:Refresh(newOptions, keep, silent)
+		Lib._fixIdentity()
 		options = newOptions or {}
 		if not keep then
 			selected = {}
@@ -2338,6 +2348,7 @@ function Container:Dropdown(o)
 	function handle:Reload()
 		if type(o.GetOptions) ~= "function" then return false, "No options provider" end
 		local ok, values = pcall(o.GetOptions)
+		Lib._fixIdentity()
 		if not ok or type(values) ~= "table" then
 			win:Notify({ Title = "Refresh failed", Content = "Options could not be loaded.", Type = "Error" })
 			return false, values
@@ -10318,8 +10329,9 @@ do
 	local function newKey()
 		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
 	end
-	local PET_SIMULATOR_99, STEAL_AN_EGG = 3317771874, 10563114921
+	local PET_SIMULATOR_99, STEAL_AN_EGG, ANIME_DICE = 3317771874, 10563114921, 10708913337
 	local function counts(gameId)
+		if gameId == ANIME_DICE then return { units = 0, boosts = 0, gear = 0, items = 0 } end
 		if gameId == STEAL_AN_EGG then return { pets = 0, eggs = 0, gear = 0, items = 0 } end
 		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
 	end
@@ -10447,12 +10459,50 @@ do
 		s.summaryText = string.format("Money: %s · Speed: %s · %s/s\nOwned: %s pets · %s eggs · %s gear · %s items\nSession gains: %s pets · %s eggs · %s gear · %s items", FormatCount(data.Money), FormatCount(data.SpeedPower), FormatCount(s.snapshot.per_second), FormatCount(owned.pets), FormatCount(owned.eggs), FormatCount(owned.gear), FormatCount(owned.items), FormatCount(s.gained.pets), FormatCount(s.gained.eggs), FormatCount(s.gained.gear), FormatCount(s.gained.items))
 	end
 
+
+	function Lib:_TrackstatReadAnimeDice()
+		local s = self._trackstat
+		if setthreadidentity then pcall(setthreadidentity, 2) end
+		local inventory = s.data.Inventory()
+		assert(type(inventory) == "table", "Inventory is not ready; retrying shortly")
+		local current, owned, catalog, stacks, placed = {}, counts(ANIME_DICE), {}, {}, {}
+		for _, slot in pairs(s.data.Slots()) do if slot.unitId then placed[slot.unitId] = true end end
+		local income = 0
+		for uid, entry in pairs(inventory) do
+			local config = s.registry.getEntryConfig(entry.name)
+			if config then
+				local kind, amount = config.kind, tonumber(entry.amount) or 1
+				local metric = kind == "Unit" and "units" or kind == "Boost" and "boosts" or kind == "Gear" and "gear" or "items"
+				local key, attrs = kind .. ":" .. entry.name, entry.attributes or {}
+				local rarity = config.getRarity and config.getRarity(attrs) or config.rarity
+				catalog[key] = { key = key, kind = kind:lower(), name = entry.name:sub(1, 100), icon = tostring(config.image or ""):match("%d+") or "", rarity = rarity, rarity_color = config.gradient and "#" .. config.gradient.Keypoints[1].Value:ToHex() or nil, description = tostring(config.description or ""):sub(1, 300) }
+				current[key] = current[key] or { name = entry.name, kind = kind:lower(), metric = metric, owned = 0 }
+				current[key].owned += amount
+				owned[metric] += amount
+				local perSecond = kind == "Unit" and config.income(attrs) or nil
+				if placed[uid] then income += perSecond or 0 end
+				table.insert(stacks, { k = key, a = amount, l = attrs.level, m = attrs.mutation and { attrs.mutation } or nil, gr = attrs.grade, tr = attrs.trait, lk = attrs.locked or nil, p = perSecond, c = kind == "Unit" and config.chance(attrs) or nil, pl = placed[uid] and 1 or nil })
+			end
+		end
+		table.sort(stacks, function(a, b) return (a.c or 0) > (b.c or 0) end)
+		while #stacks > 1000 do table.remove(stacks) end
+		local details = self:_TrackstatDelta(s, current)
+		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details, inventory = stacks, money = s.data.Money(), rolls = s.data.Rolls(), rebirths = s.data.Rebirth(), per_second = income }
+		if s.stopping or os.clock() >= s.uploadAt then s.catalog = catalog end
+		s.summaryText = string.format("Money: %s · Rolls: %s · Rebirths: %s\nOwned: %s units · %s boosts · %s gear · %s items\nSession gains: %s units · %s boosts · %s gear · %s items", FormatCount(s.snapshot.money), FormatCount(s.snapshot.rolls), FormatCount(s.snapshot.rebirths), FormatCount(owned.units), FormatCount(owned.boosts), FormatCount(owned.gear), FormatCount(owned.items), FormatCount(s.gained.units), FormatCount(s.gained.boosts), FormatCount(s.gained.gear), FormatCount(s.gained.items))
+	end
+
 	function Lib:_TrackstatRead()
 		local s = self._trackstat
 		if not s.session then
 			if setthreadidentity then pcall(setthreadidentity, 2) end
 			local rs = game.ReplicatedStorage
-			if s.gameId == STEAL_AN_EGG then
+			if s.gameId == ANIME_DICE then
+				s.data = require(rs.Framework.Features.Data.DataController)
+				require(rs.Framework.Features.Inventory.EntryTypes)
+				s.registry = require(rs.Framework.Features.Inventory.EntryRegistry)
+				assert(type(s.data.Inventory()) == "table", "Inventory is not ready; retrying shortly")
+			elseif s.gameId == STEAL_AN_EGG then
 				s.save, s.assets, s.gears = require(rs.Shared.Save), require(rs.Data.Assets).Directory, require(rs.Data.Gears).Directory
 				s.rarities, s.currency = require(rs.Data.Rarity).Rarities, require(rs.Data.Currency).Directory
 				assert(s.save.IsLoaded(), "Inventory is not ready; retrying shortly")
@@ -10462,6 +10512,7 @@ do
 			s.previous, s.details, s.gained = nil, {}, counts(s.gameId)
 			s.session, s.sequence, s.uploadAt = HttpService:GenerateGUID(false), 0, 0
 		end
+		if s.gameId == ANIME_DICE then return self:_TrackstatReadAnimeDice() end
 		if s.gameId == STEAL_AN_EGG then return self:_TrackstatReadStealAnEgg() end
 		local current, owned = {}, counts()
 		for _, item in pairs(s.inventory.Container(LocalPlayer):All()) do
@@ -10546,7 +10597,7 @@ do
 	local imagesUrl = "https://xsygxfeutjcwmqejslbv.supabase.co/storage/v1/object/"
 	function Lib:_TrackstatImages(s, catalog)
 		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
-		local folder = s.gameId == STEAL_AN_EGG and "stealanegg" or "petsimulator99"
+		local folder = s.gameId == ANIME_DICE and "animedice" or s.gameId == STEAL_AN_EGG and "stealanegg" or "petsimulator99"
 		local icons = {}
 		for _, item in pairs(catalog) do if item.icon ~= "" and not s.imaged[item.icon] then table.insert(icons, item.icon) end end
 		if #icons == 0 or s.closed then return end
@@ -10589,7 +10640,7 @@ do
 		local keys = {}
 		for key in pairs(catalog) do if not s.known[key] then table.insert(keys, key) end end
 		if #keys > 0 then
-			local prefix = s.gameId == STEAL_AN_EGG and "trackstats_stealanegg_catalog_" or "trackstat_catalog_"
+			local prefix = s.gameId == ANIME_DICE and "trackstats_animedice_catalog_" or s.gameId == STEAL_AN_EGG and "trackstats_stealanegg_catalog_" or "trackstat_catalog_"
 			local ok, missing = self:_TrackstatRPC(prefix .. "missing", { p_keys = keys })
 			if not ok then error(missing, 0) end
 			if s.closed then return end
@@ -10627,7 +10678,7 @@ do
 
 	function Lib:_TrackstatHeartbeat()
 		local s = self._trackstat
-		if not s or s.closed or s.linking or not s.enabled or not s.registered or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
+		if not s or s.closed or not s.enabled or not s.registered or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
 		s.presenceSession = s.presenceSession or HttpService:GenerateGUID(false)
 		s.presenceBusy, s.presenceAt = true, os.clock() + 15
 		task.spawn(function()
@@ -10641,7 +10692,7 @@ do
 	function Lib:_UpdateTrackstat()
 		self:_TrackstatHeartbeat()
 		local s = self._trackstat
-		if not s or s.closed or s.busy or s.linking or not (s.enabled or s.stopping) or os.clock() < s.nextAt then return end
+		if not s or s.closed or s.busy or not (s.enabled or s.stopping) or os.clock() < s.nextAt then return end
 		s.busy, s.nextAt = true, os.clock() + 5
 		task.spawn(function()
 			local ok, err = pcall(function()
@@ -10687,37 +10738,6 @@ do
 		return ok, data
 	end
 
-	-- A new device for a Roblox account that already has a history asks to join it; the owner approves once on the website,
-	-- which hands this device the existing key. No answer within 15 minutes (or "start a new history") keeps a fresh key.
-	function Lib:_TrackstatLink(s)
-		s.linking = true
-		task.spawn(function()
-			local nonce = newKey():sub(4)
-			local ok, res = self:_TrackstatRPC("trackstat_link_request", { p_nonce = nonce, p_roblox_id = tostring(LocalPlayer.UserId), p_username = LocalPlayer.Name })
-			if ok and type(res) == "table" and res.status == "pending" and not s.closed then
-				s.status:SetText("New device: approve it on seisen.vercel.app/trackstat to keep your history")
-				s.skipLink:SetVisible(true)
-				local deadline = os.clock() + 900
-				while s.linking and not s.closed and os.clock() < deadline do
-					task.wait(5)
-					local got, answer = self:_TrackstatRPC("trackstat_link_pickup", { p_nonce = nonce })
-					if got and type(answer) == "table" and answer.status ~= "pending" then
-						if answer.status == "approved" and type(answer.key) == "string" and answer.key:match("^sp_%x+$") and #answer.key == 67 then
-							s.key, s.registered = answer.key, false
-							s.status:SetText("Linked to your existing history")
-						else s.status:SetText("Starting a new history on this device") end
-						break
-					end
-				end
-			end
-			s.linking = false
-			if not s.closed then
-				s.skipLink:SetVisible(false)
-				self:_TrackstatSave()
-			end
-		end)
-	end
-
 	function Lib:_BuildTrackstatTab(win)
 		local tab = win:AddTab("Trackstat", "activity", true)
 		tab._entry.Button.LayoutOrder = 0 -- right below Home (-2) and Cloud (-1)
@@ -10725,18 +10745,17 @@ do
 		local stats = tab:AddRightSection("Pet Simulator 99", "chart-no-axes-combined")
 		local path = ROOT_FOLDER .. "/Trackstat/" .. tostring(LocalPlayer.UserId) .. ".json"
 		local saved = ReadJson(path) or {}
-		local fresh = HasFiles() and next(saved) == nil -- a device that has never run Trackstat for this Roblox account
 		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
 		local s = self._trackstat
 		if not s or s.closed then
-			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == STEAL_AN_EGG, busy = false, nextAt = 0, known = {}, imaged = {} }
+			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == STEAL_AN_EGG or game.GameId == ANIME_DICE, busy = false, nextAt = 0, known = {}, imaged = {} }
 			self._trackstat = s
 		end
 		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
 		s.status = connection:AddLabel({ Text = s.enabled and "Detecting game - tracking starts automatically" or "This game is not supported by Trackstat" })
-		connection:AddLabel({ Text = fresh and "Looking for your existing history…" or self:_TrackstatSave() and "Key saved for this Roblox account on this device." or "No file storage: copy your key before closing this session." })
+		connection:AddLabel({ Text = self:_TrackstatSave() and "Key saved for this Roblox account on this device." or "No file storage: copy your key before closing this session." })
 		connection:AddButton({ Name = "Copy connection key", Callback = function()
-			if s.busy or s.linking then return end
+			if s.busy then return end
 			s.busy = true
 			local ok, err = self:_TrackstatConnect()
 			s.busy = false
@@ -10747,27 +10766,30 @@ do
 				s.status:SetText(copied and "Key copied · paste it on the website Trackstat tab" or "Executor clipboard is unavailable")
 			else s.status:SetText(tostring(err)) end
 		end })
-		connection:AddButton({ Name = "Reset connection key", ConfirmText = "Click again to revoke old key", Callback = function()
-			if s.busy or s.linking then return end
+		connection:AddButton({ Name = "Reset connection key", ConfirmText = "Click again to DELETE data and reset", Callback = function()
+			if s.busy then return end
 			s.busy = true
 			local ok, err = self:_TrackstatConnect()
 			if ok then
 				s.pending = newKey()
 				local persisted = self:_TrackstatSave()
 				if not HasFiles() or persisted then
-					ok, err = self:_TrackstatRPC("trackstat_reset", { p_key = s.key, p_new_key = s.pending })
-					if ok then s.key, s.pending = s.pending, nil; self:_TrackstatSave() end
+					ok, err = self:_TrackstatRPC("trackstat_reset_and_wipe", { p_key = s.key, p_new_key = s.pending })
+					if ok then
+						s.key, s.pending = s.pending, nil
+						s.session, s.snapshot, s.previous = nil, nil, nil
+						s.presenceSession, s.presenceAt, s.nextAt = HttpService:GenerateGUID(false), 0, 0
+						self:_TrackstatSave()
+					end
 				else ok, err = false, "Key file could not be saved; reset was not sent" end
 			end
 			s.busy = false
-			if not s.closed then s.status:SetText(ok and "Key reset · copy the new key to reconnect your website" or tostring(err)) end
+			if not s.closed then s.status:SetText(ok and "Data deleted · copy the new key to reconnect your website" or tostring(err)) end
 		end })
-		connection:AddParagraph({ Title = "Website", Content = "Keep your key private. Reset revokes the old key but keeps history." })
+		connection:AddParagraph({ Title = "Website", Content = "Keep your key private. Reset permanently deletes this connection inventory, gains and history and removes it from website accounts." })
 		connection:AddButton({ Name = "Copy Website", Callback = function()
 			win:CopyToClipboard("https://seisen.vercel.app/trackstat", "Website link copied")
 		end })
-		s.skipLink = connection:AddButton({ Name = "Start a new history instead", Callback = function() s.linking = false end })
-		s.skipLink:SetVisible(false)
 		local function addGame(section, gameId, about)
 			local summary = section:AddLabel({ Text = game.GameId == gameId and "Tracks automatically in this game. Existing inventory is not counted as session gains." or "Not playing this game." })
 			if game.GameId == gameId then s.summary = summary end
@@ -10776,7 +10798,7 @@ do
 		end
 		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 15 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
 		addGame(tab:AddRightSection("Steal an Egg", "egg"), STEAL_AN_EGG, "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 15 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
-		if fresh then self:_TrackstatLink(s) end
+		addGame(tab:AddRightSection("Anime Dice", "dices"), ANIME_DICE, "Units with levels, mutations, grades and traits, boosts, gear and items including tokens. Money, placed-unit income, rolls and rebirths. Checks run every 5 seconds and sync every 15 seconds. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 	end
 end
 
