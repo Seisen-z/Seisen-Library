@@ -10330,6 +10330,11 @@ do
 		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
 	end
 	local PET_SIMULATOR_99, STEAL_AN_EGG, ANIME_DICE = 3317771874, 10563114921, 10708913337
+	local function modelIcon(key)
+		local a, b = 5381, 0
+		for i = 1, #key do a = (a * 33 + key:byte(i)) % 4294967296; b = (b * 31 + key:byte(i)) % 1000000000 end
+		return "0" .. string.format("%010u%09u", a, b)
+	end
 	local function counts(gameId)
 		if gameId == ANIME_DICE then return { units = 0, boosts = 0, gear = 0, items = 0 } end
 		if gameId == STEAL_AN_EGG then return { pets = 0, eggs = 0, gear = 0, items = 0 } end
@@ -10468,6 +10473,15 @@ do
 		local current, owned, catalog, stacks, placed = {}, counts(ANIME_DICE), {}, {}, {}
 		for _, slot in pairs(s.data.Slots()) do if slot.unitId then placed[slot.unitId] = true end end
 		local income = 0
+		local function buffList(buffs)
+			local list = {}
+			for name, b in pairs(buffs or {}) do
+				local v = tonumber(b.amount) or 0
+				table.insert(list, { (name:gsub(" Multiplier$", "")), b.bucket == "percentage" and string.format("+%g%%", v * 100) or string.format("x%g", v) })
+			end
+			table.sort(list, function(x, y) return x[1] < y[1] end)
+			return #list > 0 and list or nil
+		end
 		for uid, entry in pairs(inventory) do
 			local config = s.registry.getEntryConfig(entry.name)
 			if config then
@@ -10476,12 +10490,13 @@ do
 				local key, attrs = kind .. ":" .. entry.name, entry.attributes or {}
 				local rarity = config.getRarity and config.getRarity(attrs) or config.rarity
 				catalog[key] = { key = key, kind = kind:lower(), name = entry.name:sub(1, 100), icon = tostring(config.image or ""):match("%d+") or "", rarity = rarity, rarity_color = config.gradient and "#" .. config.gradient.Keypoints[1].Value:ToHex() or nil, description = tostring(config.description or ""):sub(1, 300) }
+				if catalog[key].icon == "" and (kind == "Unit" and config.model or kind == "Gear" and game.ReplicatedStorage.Assets.Gears:FindFirstChild(entry.name)) then catalog[key].icon = modelIcon(key) end
 				current[key] = current[key] or { name = entry.name, kind = kind:lower(), metric = metric, owned = 0 }
 				current[key].owned += amount
 				owned[metric] += amount
 				local perSecond = kind == "Unit" and config.income(attrs) or nil
 				if placed[uid] then income += perSecond or 0 end
-				table.insert(stacks, { k = key, a = amount, l = attrs.level, m = attrs.mutation and { attrs.mutation } or nil, gr = attrs.grade, tr = attrs.trait, lk = attrs.locked or nil, p = perSecond, c = kind == "Unit" and config.chance(attrs) or nil, pl = placed[uid] and 1 or nil })
+				table.insert(stacks, { k = key, a = amount, l = attrs.level, m = attrs.mutation and { attrs.mutation } or nil, gr = attrs.grade, tr = attrs.trait, lk = attrs.locked or nil, p = perSecond, c = kind == "Unit" and config.chance(attrs) or nil, pl = placed[uid] and 1 or nil, bf = buffList(config.buffs), d = config.duration, sl = config.slot, lm = config.luckMultiplier })
 			end
 		end
 		table.sort(stacks, function(a, b) return (a.c or 0) > (b.c or 0) end)
@@ -10612,15 +10627,50 @@ do
 				budget -= 1
 				s.imaged[icon] = true
 				local finished, started = false, os.clock()
-				task.spawn(function()
+				local source, target, viewport, screen
+				local worker = task.spawn(function()
 					local success = false
 					pcall(function()
-						local source = assets:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. icon))
-						local target = assets:CreateEditableImage({ Size = Vector2.new(96, 96) })
+						if s.gameId == ANIME_DICE and icon:sub(1, 1) == "0" then
+							local config = s.registry.getEntryConfig(item.name)
+							local model
+							if config.kind == "Unit" then model = config.model() end
+							if setthreadidentity then pcall(setthreadidentity, 8) end
+							viewport = Instance.new("ViewportFrame")
+							viewport.Size, viewport.BackgroundTransparency, viewport.ImageTransparency = UDim2.fromOffset(96, 96), 1, 1
+							screen = Instance.new("ScreenGui")
+							screen.Name, screen.DisplayOrder = "SeisenTrackstatThumbnail", -2147483648
+							screen.Parent, viewport.Parent = game:GetService("CoreGui"), screen
+							if config.kind == "Gear" then
+								model = Instance.new("Model")
+								model.Parent = viewport
+								local gear = game.ReplicatedStorage.Assets.Gears:FindFirstChild(item.name):Clone()
+								for _, child in ipairs(gear:GetChildren()) do
+									if child:IsA("BasePart") then
+										child.Anchored, child.Parent, model.PrimaryPart = true, model, child
+										child:RemoveTag("IgnoreViewportBounds")
+										local attachment = child:FindFirstChildOfClass("Attachment")
+										if attachment then child.PivotOffset = attachment.CFrame end
+									end
+								end
+								gear:Destroy()
+							end
+							model:ScaleTo(1)
+							model:PivotTo(CFrame.Angles(0, config.kind == "Gear" and math.rad((config.slot == "Back" and 0 or 180) + 25) or math.pi, 0))
+							model.Parent = viewport
+							local cf, size = model:GetBoundingBox()
+							local camera = Instance.new("Camera")
+							camera.FieldOfView = 30
+							camera.CFrame = CFrame.new(cf.Position + Vector3.new(0, 0, math.max(size.X, size.Y) / (2 * math.tan(math.rad(15))) + size.Z / 2), cf.Position)
+							camera.Parent, viewport.CurrentCamera = viewport, camera
+							task.wait(0.5)
+							source = assets:CreateEditableImageAsync(Content.fromUri(viewport:CaptureSnapshotAsync()))
+						else
+							source = assets:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. icon))
+						end
+						target = assets:CreateEditableImage({ Size = Vector2.new(96, 96) })
 						target:DrawImageTransformed(Vector2.new(48, 48), Vector2.new(96 / source.Size.X, 96 / source.Size.Y), 0, source, { CombineType = Enum.ImageCombineType.Overwrite })
 						local png = encodePng(96, buffer.tostring(target:ReadPixelsBuffer(Vector2.zero, target.Size)))
-						source:Destroy()
-						target:Destroy()
 						if s.closed then return end
 						local result = req({ Url = imagesUrl .. "trackstats-images/" .. folder .. "/" .. icon .. ".png", Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "image/png" }, Body = png })
 						success = type(result) == "table" and result.StatusCode and (result.StatusCode >= 200 and result.StatusCode < 300 or result.StatusCode == 409)
@@ -10628,8 +10678,12 @@ do
 					s.imaged[icon] = success or nil
 					finished = true
 				end)
-				while not finished and os.clock() - started < 6 do task.wait(0.1) end
-				if not finished then s.imaged[icon] = nil end
+				while not finished and not s.closed and os.clock() - started < 6 do task.wait(0.1) end
+				if not finished then task.cancel(worker); s.imaged[icon] = nil end
+				if source then source:Destroy() end
+				if target then target:Destroy() end
+				if viewport then viewport:Destroy() end
+				if screen then screen:Destroy() end
 			end
 		end
 		if identity and setthreadidentity then pcall(setthreadidentity, identity) end
