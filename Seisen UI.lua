@@ -8501,7 +8501,7 @@ function Lib:_EnsureBuiltInSection(window)
 end
 
 function Window:_buildServerHop(tab)
-	local section = tab:AddRightSection("Server Hop", "shuffle")
+	local section = tab:AddRightSection("Session", "shuffle")
 	local status = section:AddLabel({ Text = "Pick a maximum player count, including you." })
 	local state = { max = 2, auto = false, busy = false, nextAt = 0, reconnect = true, reconnectAt = nil, checkAt = 0 }
 	local autoExecute, armed = true, false
@@ -8554,6 +8554,30 @@ function Window:_buildServerHop(tab)
 	section:AddToggle({ Name = "Auto Execute On Teleport", Flag = "BuiltIn_AutoExecute", Default = true,
 		Tooltip = "Run this game's script again after teleporting. Requires your executor's teleport queue.",
 		Callback = function(value) autoExecute = value end })
+	local bottingOverlay
+	section:AddToggle({ Name = "Botting Mode", Flag = "BuiltIn_BottingMode", Default = false,
+		Tooltip = "Turns off 3D rendering and covers the screen in black. Everything keeps running, your GPU does not.",
+		Callback = function(value)
+			if bottingOverlay then pcall(bottingOverlay.Destroy, bottingOverlay) bottingOverlay = nil end
+			pcall(function() RunService:Set3dRenderingEnabled(not value) end)
+			if not value then return end
+			local ok, host = pcall(function() return game:GetService("CoreGui") end)
+			host = ok and host or LocalPlayer:FindFirstChildOfClass("PlayerGui")
+			if not host then return end
+			bottingOverlay = Instance.new("ScreenGui")
+			bottingOverlay.Name = "SeisenBottingOverlay"
+			bottingOverlay.ResetOnSpawn = false
+			bottingOverlay.IgnoreGuiInset = true
+			bottingOverlay.DisplayOrder = -1
+			bottingOverlay.Parent = host
+			local black = Instance.new("Frame")
+			black.Name = "Blackscreen"
+			black.Size = UDim2.new(1, 0, 1, 0)
+			black.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+			black.BorderSizePixel = 0
+			black.Active = false
+			black.Parent = bottingOverlay
+		end })
 	self._serverHopStep = function()
 		if not self.Gui.Parent then return end
 		if state.reconnect and os.clock() >= state.checkAt then
