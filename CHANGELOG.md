@@ -1,3 +1,8 @@
+## Oct 17, 2026
+
+- Added Anime Dice Trackstat.
+- Fixed Anime Dice unit and gear thumbnails.
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -9,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Running a script again unloads the previous library, so two windows never stack.
+
+- Tabs and dropdowns no longer fail to load after the game drops the script's access.
+
 - Library stays above game interfaces.
 
 - Trackstat image caching and upload limits.
@@ -16,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Trackstat stops live presence when the library unloads.
 
 ### Added
+
+- Reset key deletes Trackstat data and website connections.
 
 - Auto Reconnect in Performance / Server Hop.
 

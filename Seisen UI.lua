@@ -11904,4 +11904,21 @@ do
  FeatureKinds.PriorityList="list"
 end
 
+-- running a script again loads a second copy of the library; unload the previous copy so only one window ever exists
+do
+	local env = getgenv and getgenv() or shared
+	local previous = env.SeisenActiveLib
+	if previous and previous ~= Lib then
+		pcall(previous.Unload, previous)
+	elseif not previous and getgc then
+		-- copies loaded before this registry existed were never recorded, so find them
+		for _, t in ipairs(getgc(true)) do
+			if type(t) == "table" and t ~= Lib and rawget(t, "Windows") and rawget(t, "Toggles") and type(rawget(t, "Unload")) == "function" then
+				pcall(t.Unload, t)
+			end
+		end
+	end
+	env.SeisenActiveLib = Lib
+end
+
 return Lib
