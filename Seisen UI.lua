@@ -10425,12 +10425,20 @@ do
 			table.sort(list)
 			return #list > 0 and list or nil
 		end
+		local placed = {}
+		for _, uid in ipairs(data.EquippedAssets or {}) do placed[uid] = true end
+		local okE, earnings = pcall(require, game.ReplicatedStorage.Shared.Util.AssetEarnings)
+		local function rateOf(pet) -- placed pets have no backpack tool, so their income comes from the game's own formula
+			if not okE then return nil end
+			local ok, rate = pcall(earnings.LiveRatePerSecond, { Category = pet.Category, Scale = math.max(tonumber(pet.Scale) or 1, 0.01), Mutations = type(pet.Mutations) == "table" and pet.Mutations or {} }, data.Gamepasses, data.Products)
+			return ok and type(rate) == "number" and rate or nil
+		end
 		for uid, pet in pairs(data.Inventory) do
 			local dir, tool = s.assets[pet.Category], tools[uid]
 			local config = tool and tool:FindFirstChild("Configuration")
 			local key = "pet:" .. pet.Category
 			add("pet", key, 1, dir and dir.DisplayName or pet.Category, dir and dir.Icon, dir and dir.Rarity)
-			table.insert(stacks, { k = key, a = 1, w = dir and dir.ModelWeight and dir.ModelWeight * (pet.Scale or 1) or nil, m = mutationList(pet.Mutations), p = config and config:GetAttribute("perSecond") or nil, f = tool and tool:GetAttribute("Favorite") or nil })
+			table.insert(stacks, { k = key, a = 1, w = dir and dir.ModelWeight and dir.ModelWeight * (pet.Scale or 1) or nil, m = mutationList(pet.Mutations), p = config and config:GetAttribute("perSecond") or rateOf(pet), f = tool and tool:GetAttribute("Favorite") or nil, pl = placed[uid] and 1 or nil })
 		end
 		for _, egg in pairs(data.EggInventory) do
 			local dir = s.assets[egg.AssetCategory]
