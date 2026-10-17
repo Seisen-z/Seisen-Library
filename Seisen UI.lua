@@ -9172,178 +9172,246 @@ function Library:_BuildConfigTab(window)
         end
     })
 
-    -- FPS Boost
-    local fpsBoostEnabled = false
-    local originalSettings = {}
-    local savedEffects    = {}
-    local savedMaterials  = {}
-    local savedPostFX     = {}
-    local savedTerrain    = {}
-    local fpsBoostConnection = nil
+    -- Startup Boost / Boost FPS (same behavior as Steal An Egg)
+    local Lighting = game:GetService("Lighting")
+    local boostSnap
+    local startupOn, flattenOn = false, false
+    local startupConn, flattenConn
+    local startupSaved = { parts = {}, decals = {}, effects = {} }
+    local flattenSaved = {}
 
-    local function processObject(obj)
+    local function takeBoostSnap()
+        if boostSnap then return end
+        boostSnap = {}
         pcall(function()
-            if obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
-                or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
-                if savedEffects[obj] == nil then
-                    savedEffects[obj] = obj.Enabled
-                end
-                obj.Enabled = false
+            boostSnap.quality    = settings().Rendering.QualityLevel
+            boostSnap.technology = Lighting.Technology
+            boostSnap.shadows    = Lighting.GlobalShadows
+            boostSnap.fogEnd     = Lighting.FogEnd
+            boostSnap.brightness = Lighting.Brightness
+            boostSnap.ambient    = Lighting.Ambient
+            boostSnap.outdoor    = Lighting.OutdoorAmbient
+        end)
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            pcall(function()
+                boostSnap.terrain = {
+                    WaterWaveSize     = terrain.WaterWaveSize,
+                    WaterWaveSpeed    = terrain.WaterWaveSpeed,
+                    WaterReflectance  = terrain.WaterReflectance,
+                    WaterTransparency = terrain.WaterTransparency,
+                    Decoration        = terrain.Decoration,
+                }
+                local clouds = terrain:FindFirstChildOfClass("Clouds")
+                if clouds then boostSnap.clouds = clouds.Enabled end
+            end)
+        end
+        if boostSnap.quality == Enum.QualityLevel.Level01 then
+            boostSnap.quality = Enum.QualityLevel.Automatic
+        end
+    end
+
+    local function applyBoostSettings(whiteAmbient)
+        takeBoostSnap()
+        pcall(function()
+            settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+            Lighting.Technology = Enum.Technology.Compatibility
+            Lighting.GlobalShadows = false
+            Lighting.FogEnd = 9e9
+            Lighting.Brightness = 2
+            if whiteAmbient then
+                Lighting.Ambient = Color3.new(1, 1, 1)
+                Lighting.OutdoorAmbient = Color3.new(1, 1, 1)
             end
         end)
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            pcall(function()
+                terrain.WaterWaveSize = 0
+                terrain.WaterWaveSpeed = 0
+                terrain.WaterReflectance = 0
+                terrain.WaterTransparency = 1
+                terrain.Decoration = false
+                local clouds = terrain:FindFirstChildOfClass("Clouds")
+                if clouds then clouds.Enabled = false end
+            end)
+        end
+    end
+
+    local function restoreBoostSettings()
+        if startupOn or flattenOn or not boostSnap then return end
+        local snap = boostSnap
+        boostSnap = nil
+        pcall(function()
+            settings().Rendering.QualityLevel = snap.quality or Enum.QualityLevel.Automatic
+            Lighting.Technology = snap.technology
+            Lighting.GlobalShadows = snap.shadows
+            Lighting.FogEnd = snap.fogEnd
+            Lighting.Brightness = snap.brightness
+            Lighting.Ambient = snap.ambient
+            Lighting.OutdoorAmbient = snap.outdoor
+        end)
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain and snap.terrain then
+            for k, v in pairs(snap.terrain) do
+                pcall(function() terrain[k] = v end)
+            end
+            if snap.clouds ~= nil then
+                pcall(function()
+                    local clouds = terrain:FindFirstChildOfClass("Clouds")
+                    if clouds then clouds.Enabled = snap.clouds end
+                end)
+            end
+        end
+    end
+
+    local function sweepBoost(fn, stillOn)
+        local last = os.clock()
+        for _, root in ipairs({ workspace, Lighting }) do
+            for _, d in ipairs(root:GetDescendants()) do
+                if not stillOn() then return end
+                pcall(fn, d)
+                if os.clock() - last > 0.004 then
+                    task.wait()
+                    last = os.clock()
+                end
+            end
+        end
+    end
+
+    local function startupEffect(d)
+        if d:IsA("ParticleEmitter") or d:IsA("Trail") or d:IsA("Beam") or d:IsA("Sparkles")
+            or d:IsA("Fire") or d:IsA("Smoke") or d:IsA("PostEffect") then
+            if d.Enabled then startupSaved.effects[d] = true end
+            d.Enabled = false
+        end
+    end
+
+    local function startupSquash(d)
+        if d:IsA("BasePart") then
+            if not startupSaved.parts[d] then
+                startupSaved.parts[d] = { d.Material, d.CastShadow, d:IsA("MeshPart") and d.RenderFidelity or nil }
+            end
+            d.Material = Enum.Material.SmoothPlastic
+            d.CastShadow = false
+            if d:IsA("MeshPart") then d.RenderFidelity = Enum.RenderFidelity.Performance end
+        elseif d:IsA("Decal") or d:IsA("Texture") then
+            if d.Texture ~= "" and not startupSaved.decals[d] then
+                startupSaved.decals[d] = d.Texture
+            end
+            d.Texture = ""
+        else
+            startupEffect(d)
+        end
+    end
+
+    local function startupRevert()
+        if startupConn then startupConn:Disconnect() startupConn = nil end
+        local n = 0
+        for d, p in pairs(startupSaved.parts) do
+            if d.Parent then
+                pcall(function()
+                    d.Material = p[1]
+                    d.CastShadow = p[2]
+                    if p[3] ~= nil and d:IsA("MeshPart") then d.RenderFidelity = p[3] end
+                end)
+            end
+            n += 1
+            if n % 400 == 0 then task.wait() end
+        end
+        for d, tex in pairs(startupSaved.decals) do
+            if d.Parent then pcall(function() d.Texture = tex end) end
+        end
+        for d in pairs(startupSaved.effects) do
+            if d.Parent then pcall(function() d.Enabled = true end) end
+        end
+        startupSaved = { parts = {}, decals = {}, effects = {} }
+        restoreBoostSettings()
+    end
+
+    local function flattenObj(d)
+        if d:IsA("BasePart") then
+            if not flattenSaved[d] then
+                flattenSaved[d] = { Material = d.Material, Color = d.Color, CastShadow = d.CastShadow }
+            end
+            d.Material = Enum.Material.SmoothPlastic
+            d.Color = Color3.fromRGB(120, 120, 120)
+            d.CastShadow = false
+        elseif d:IsA("ParticleEmitter") then
+            if not flattenSaved[d] then flattenSaved[d] = { Enabled = d.Enabled, Rate = d.Rate } end
+            d.Enabled = false
+            d.Rate = 0
+            d:Clear()
+        elseif d:IsA("Trail") or d:IsA("Beam") or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles")
+            or d:IsA("PostEffect") or d:IsA("Light") or d:IsA("Highlight") or d:IsA("Clouds") then
+            if not flattenSaved[d] then flattenSaved[d] = { Enabled = d.Enabled } end
+            d.Enabled = false
+        elseif d:IsA("Atmosphere") then
+            if not flattenSaved[d] then flattenSaved[d] = { Density = d.Density, Haze = d.Haze, Glare = d.Glare } end
+            d.Density = 0
+            d.Haze = 0
+            d.Glare = 0
+        end
+    end
+
+    local function flattenRevert()
+        if flattenConn then flattenConn:Disconnect() flattenConn = nil end
+        local n = 0
+        for d, props in pairs(flattenSaved) do
+            if d.Parent then
+                for k, v in pairs(props) do
+                    pcall(function() d[k] = v end)
+                end
+            end
+            n += 1
+            if n % 400 == 0 then task.wait() end
+        end
+        flattenSaved = {}
+        restoreBoostSettings()
     end
 
     configRight:AddToggle({
-        Name = "FPS Boost",
+        Name = "Startup Boost",
         Default = false,
-        Flag = "BuiltIn_FPSBoost",
-        Tooltip = "Optimize graphics for better performance",
+        Flag = "BuiltIn_StartupBoost",
+        Tooltip = "Lowers graphics: low quality, flat materials, no textures, effects or water detail. Turn off to get them back.",
         Callback = function(v)
-            fpsBoostEnabled = v
-            local Lighting = game:GetService("Lighting")
-            local Terrain  = workspace:FindFirstChildOfClass("Terrain")
-
-            if fpsBoostEnabled then
-                originalSettings.GlobalShadows = Lighting.GlobalShadows
-                originalSettings.FogEnd        = Lighting.FogEnd
-                originalSettings.FogStart      = Lighting.FogStart
-                Lighting.GlobalShadows = false
-                Lighting.FogEnd        = 100000
-                Lighting.FogStart      = 100000
-
-                local postFXClasses = {
-                    "BloomEffect", "BlurEffect", "DepthOfFieldEffect",
-                    "SunRaysEffect"
-                }
-                for _, child in ipairs(Lighting:GetChildren()) do
-                    for _, cls in ipairs(postFXClasses) do
-                        if child:IsA(cls) then
-                            if savedPostFX[child] == nil then
-                                savedPostFX[child] = { Enabled = child.Enabled }
-                            end
-                            child.Enabled = false
-                            break
-                        end
+            startupOn = v
+            if v then
+                task.spawn(function()
+                    applyBoostSettings(true)
+                    sweepBoost(startupSquash, function() return startupOn end)
+                    if startupOn and not startupConn then
+                        startupConn = game.DescendantAdded:Connect(function(d)
+                            if startupOn then pcall(startupEffect, d) end
+                        end)
                     end
-                end
-
-                if Terrain then
-                    pcall(function()
-                        savedTerrain.Decoration        = Terrain.Decoration
-                        savedTerrain.WaterWaveSize     = Terrain.WaterWaveSize
-                        savedTerrain.WaterWaveSpeed    = Terrain.WaterWaveSpeed
-                        savedTerrain.WaterReflectance  = Terrain.WaterReflectance
-                        savedTerrain.WaterTransparency = Terrain.WaterTransparency
-                        Terrain.Decoration        = false
-                        Terrain.WaterWaveSize     = 0
-                        Terrain.WaterWaveSpeed    = 0
-                        Terrain.WaterReflectance  = 0
-                        Terrain.WaterTransparency = 0.5
-                    end)
-                end
-
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    processObject(obj)
-                end
-
-                if not fpsBoostConnection then
-                    fpsBoostConnection = workspace.DescendantAdded:Connect(function(obj)
-                        if fpsBoostEnabled then processObject(obj) end
-                    end)
-                end
-
-                pcall(function()
-                    settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
                 end)
             else
-                if fpsBoostConnection then
-                    fpsBoostConnection:Disconnect()
-                    fpsBoostConnection = nil
-                end
-
-                if originalSettings.GlobalShadows ~= nil then
-                    Lighting.GlobalShadows = originalSettings.GlobalShadows
-                    Lighting.FogEnd        = originalSettings.FogEnd
-                    Lighting.FogStart      = originalSettings.FogStart
-                    originalSettings = {}
-                end
-
-                for obj, saved in pairs(savedPostFX) do
-                    pcall(function()
-                        if obj and obj.Parent then obj.Enabled = saved.Enabled end
-                    end)
-                end
-                savedPostFX = {}
-
-                if Terrain and next(savedTerrain) then
-                    pcall(function()
-                        Terrain.Decoration        = savedTerrain.Decoration
-                        Terrain.WaterWaveSize     = savedTerrain.WaterWaveSize
-                        Terrain.WaterWaveSpeed    = savedTerrain.WaterWaveSpeed
-                        Terrain.WaterReflectance  = savedTerrain.WaterReflectance
-                        Terrain.WaterTransparency = savedTerrain.WaterTransparency
-                    end)
-                    savedTerrain = {}
-                end
-
-                pcall(function()
-                    settings().Rendering.QualityLevel = Enum.QualityLevel.Automatic
-                end)
-
-                for obj, wasEnabled in pairs(savedEffects) do
-                    pcall(function()
-                        if obj and obj.Parent then obj.Enabled = wasEnabled end
-                    end)
-                end
-                savedEffects = {}
+                task.spawn(startupRevert)
             end
         end
     })
 
-    -- SmoothPlastic Mode (FPS Boost +)
-    local smoothPlasticEnabled = false
-    local spMaterials  = {}
-    local spConnection = nil
-
     configRight:AddToggle({
-        Name = "FPS Boost +",
+        Name = "Boost FPS",
         Default = false,
-        Flag = "BuiltIn_SmoothPlastic",
-        Tooltip = "Replace all part materials with SmoothPlastic for better FPS",
+        Flag = "BuiltIn_BoostFPS",
+        Tooltip = "Flattens the map to grey smooth parts and removes particles, lights, highlights and atmosphere for more FPS. Turn off to restore.",
         Callback = function(v)
-            smoothPlasticEnabled = v
-
-            local function applyToObj(obj)
-                pcall(function()
-                    if obj:IsA("BasePart") and obj.Material ~= Enum.Material.SmoothPlastic then
-                        if spMaterials[obj] == nil then
-                            spMaterials[obj] = obj.Material
-                        end
-                        obj.Material = Enum.Material.SmoothPlastic
+            flattenOn = v
+            if v then
+                task.spawn(function()
+                    applyBoostSettings(false)
+                    sweepBoost(flattenObj, function() return flattenOn end)
+                    if flattenOn and not flattenConn then
+                        flattenConn = workspace.DescendantAdded:Connect(function(d)
+                            if flattenOn then task.defer(pcall, flattenObj, d) end
+                        end)
                     end
                 end)
-            end
-
-            if smoothPlasticEnabled then
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    applyToObj(obj)
-                end
-                if not spConnection then
-                    spConnection = workspace.DescendantAdded:Connect(function(obj)
-                        if smoothPlasticEnabled then applyToObj(obj) end
-                    end)
-                end
             else
-                if spConnection then
-                    spConnection:Disconnect()
-                    spConnection = nil
-                end
-                for obj, mat in pairs(spMaterials) do
-                    pcall(function()
-                        if obj and obj.Parent then obj.Material = mat end
-                    end)
-                end
-                spMaterials = {}
+                task.spawn(flattenRevert)
             end
         end
     })

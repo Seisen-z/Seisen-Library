@@ -1,3 +1,7 @@
+﻿## Oct 18, 2026
+
+- Replaced FPS Boost and FPS Boost + with Startup Boost and Boost FPS.
+
 ## Oct 17, 2026
 
 - Added Anime Dice Trackstat.
