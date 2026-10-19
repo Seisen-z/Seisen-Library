@@ -10417,6 +10417,7 @@ end
 ---------------------------------------------------------------- Trackstat (separate project; keys never enter configs)
 do
 	local url = "https://xsygxfeutjcwmqejslbv.supabase.co/rest/v1/rpc/"
+	local inventoryUrl = "https://seisentrack.wisp.uno/v1/inventory"
 	local publicKey = "sb_publishable_565kome-b7OZJPc7-kWSPQ_n_nwH8q5"
 	local function newKey()
 		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
@@ -10479,6 +10480,7 @@ do
 			s.gained[item.metric] += gain
 			s.details[id] = s.details[id] or { name = item.name, kind = item.kind, gained = 0, owned = 0 }
 			s.details[id].gained += gain
+			if gain > 0 then s.details[id].t = os.time() end
 		end
 		local details = {}
 		for id, item in pairs(s.details) do
@@ -10834,7 +10836,7 @@ do
 		local s = self._trackstat
 		if not s or s.closed or not s.enabled or not s.registered or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
 		s.presenceSession = s.presenceSession or HttpService:GenerateGUID(false)
-		s.presenceBusy, s.presenceAt = true, os.clock() + 15
+		s.presenceBusy, s.presenceAt = true, os.clock() + 45
 		task.spawn(function()
 			if not s.closed then
 				self:_TrackstatRPC("trackstat_presence", { p_key = s.key, p_session = s.presenceSession, p_game = tostring(s.gameId), p_active = true })
@@ -10866,7 +10868,10 @@ do
 					local sent, reason = self:_TrackstatSend(s)
 					s.stopping = false
 					if not sent then error(reason, 0) end
-					s.uploadAt = os.clock() + 15
+					-- A saved push already proves the account is online; an unchanged one leaves that to the heartbeat and waits longer
+					local idle = type(reason) == "table" and reason.unchanged
+					s.uploadAt = os.clock() + (idle and 60 or 30)
+					if not idle then s.presenceAt = os.clock() + 45 end
 					if s.catalog and not s.catalogBusy then
 						s.catalogBusy = true
 						task.spawn(function()
@@ -10888,6 +10893,16 @@ do
 		if ok and type(data) == "table" then
 			if data.expired then s.session = nil; return false, "Starting a fresh session after history cleanup" end
 			if data.rateLimited then return false, "Sync rate limited; retrying shortly", math.clamp(tonumber(data.retryAfter) or 15, 1, 15) end
+		end
+		-- The inventory also goes to the Trackstat server, only when it changed since the last time it arrived there
+		local inventory = ok and s.snapshot and s.snapshot.inventory
+		local req = inventory and httpRequest()
+		if req then
+			local body = HttpService:JSONEncode({ game = tostring(game.GameId), inventory = inventory })
+			if body ~= s.sentInventory then
+				local sent, res = pcall(req, { Url = inventoryUrl, Method = "POST", Headers = { ["Content-Type"] = "application/json", ["X-Connection-Key"] = s.key }, Body = body })
+				if sent and type(res) == "table" and res.StatusCode and res.StatusCode >= 200 and res.StatusCode < 300 then s.sentInventory = body end
+			end
 		end
 		return ok, data
 	end
@@ -10950,9 +10965,9 @@ do
 			section:AddParagraph({ Title = "What is tracked", Content = about })
 			section:SetCollapsed(true)
 		end
-		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 15 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
-		addGame(tab:AddRightSection("Steal an Egg", "egg"), STEAL_AN_EGG, "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 15 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
-		addGame(tab:AddRightSection("Anime Dice", "dices"), ANIME_DICE, "Units with levels, mutations, grades and traits, boosts, gear and items including tokens. Money, placed-unit income, rolls and rebirths. Checks run every 5 seconds and sync every 15 seconds. Existing inventory is not a gain; trades and rewards count as inventory increases.")
+		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
+		addGame(tab:AddRightSection("Steal an Egg", "egg"), STEAL_AN_EGG, "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
+		addGame(tab:AddRightSection("Anime Dice", "dices"), ANIME_DICE, "Units with levels, mutations, grades and traits, boosts, gear and items including tokens. Money, placed-unit income, rolls and rebirths. Checks run every 5 seconds and sync every 30 seconds. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 	end
 end
 
