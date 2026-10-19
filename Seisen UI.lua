@@ -10868,10 +10868,8 @@ do
 					local sent, reason = self:_TrackstatSend(s)
 					s.stopping = false
 					if not sent then error(reason, 0) end
-					-- A saved push already proves the account is online; an unchanged one leaves that to the heartbeat and waits longer
-					local idle = type(reason) == "table" and reason.unchanged
-					s.uploadAt = os.clock() + (idle and 60 or 30)
-					if not idle then s.presenceAt = os.clock() + 45 end
+					-- An unchanged account waits longer between pushes; the heartbeat alone keeps it shown as online
+					s.uploadAt = os.clock() + ((type(reason) == "table" and reason.unchanged) and 60 or 30)
 					if s.catalog and not s.catalogBusy then
 						s.catalogBusy = true
 						task.spawn(function()
