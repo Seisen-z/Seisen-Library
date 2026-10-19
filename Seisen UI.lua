@@ -10834,7 +10834,7 @@ do
 
 	function Lib:_TrackstatHeartbeat()
 		local s = self._trackstat
-		if not s or s.closed or not s.enabled or not s.registered or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
+		if not s or s.closed or not s.enabled or not s.registered or s.unconnected or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
 		s.presenceSession = s.presenceSession or HttpService:GenerateGUID(false)
 		s.presenceBusy, s.presenceAt = true, os.clock() + 45
 		task.spawn(function()
@@ -10869,7 +10869,7 @@ do
 					s.stopping = false
 					if not sent then error(reason, 0) end
 					-- An unchanged account waits longer between pushes; the heartbeat alone keeps it shown as online
-					s.uploadAt = os.clock() + ((type(reason) == "table" and reason.unchanged) and 60 or 30)
+					s.uploadAt = os.clock() + (s.unconnected and 120 or ((type(reason) == "table" and reason.unchanged) and 60 or 30))
 					if s.catalog and not s.catalogBusy then
 						s.catalogBusy = true
 						task.spawn(function()
@@ -10877,7 +10877,7 @@ do
 							s.catalogBusy = false
 						end)
 					end
-					if not s.closed then s.status:SetText((s.enabled and "Tracking" or "Stopped") .. " · synced " .. os.date("%X")) end
+					if not s.closed then s.status:SetText((s.enabled and "Tracking" or "Stopped") .. (s.unconnected and " · not saved, add your key on the website" or " · synced " .. os.date("%X"))) end
 				end
 			end)
 			s.busy = false
@@ -10887,14 +10887,23 @@ do
 
 	function Lib:_TrackstatSend(s)
 		s.sequence += 1
-		local ok, data = self:_TrackstatRPC("trackstat_push", { p_key = s.key, p_session = s.session, p_sequence = s.sequence, p_game = tostring(game.GameId), p_snapshot = s.snapshot })
+		-- Supabase keeps only the inventory totals; the inventory itself goes to the Trackstat server
+		local inventory, snapshot = s.snapshot.inventory, s.snapshot
+		if inventory then
+			snapshot = table.clone(snapshot)
+			local value = 0
+			for _, stack in ipairs(inventory) do value += (stack.r or 0) * (stack.a or 0) end
+			snapshot.inventory, snapshot.inventory_value, snapshot.has_inventory = nil, value, #inventory > 0
+		end
+		local ok, data = self:_TrackstatRPC("trackstat_push", { p_key = s.key, p_session = s.session, p_sequence = s.sequence, p_game = tostring(game.GameId), p_snapshot = snapshot })
 		if ok and type(data) == "table" then
 			if data.expired then s.session = nil; return false, "Starting a fresh session after history cleanup" end
 			if data.rateLimited then return false, "Sync rate limited; retrying shortly", math.clamp(tonumber(data.retryAfter) or 15, 1, 15) end
 		end
-		-- The inventory also goes to the Trackstat server, only when it changed since the last time it arrived there
-		local inventory = ok and s.snapshot and s.snapshot.inventory
-		local req = inventory and httpRequest()
+		-- Accounts not connected on the website are still tracked here, but nothing of theirs is saved
+		s.unconnected = ok and type(data) == "table" and data.connected == false or nil
+		-- Changed inventories go to the Trackstat server, only when it changed since the last time it arrived there
+		local req = ok and inventory and not s.unconnected and httpRequest()
 		if req then
 			local body = HttpService:JSONEncode({ game = tostring(game.GameId), inventory = inventory })
 			if body ~= s.sentInventory then
