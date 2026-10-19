@@ -10834,7 +10834,7 @@ do
 
 	function Lib:_TrackstatHeartbeat()
 		local s = self._trackstat
-		if not s or s.closed or not s.enabled or not s.registered or s.unconnected or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
+		if not s or s.closed or not s.enabled or not s.registered or s.presenceBusy or os.clock() < (s.presenceAt or 0) then return end
 		s.presenceSession = s.presenceSession or HttpService:GenerateGUID(false)
 		s.presenceBusy, s.presenceAt = true, os.clock() + 45
 		task.spawn(function()
@@ -10877,7 +10877,7 @@ do
 							s.catalogBusy = false
 						end)
 					end
-					if not s.closed then s.status:SetText((s.enabled and "Tracking" or "Stopped") .. (s.unconnected and " · not saved, add your key on the website" or " · synced " .. os.date("%X"))) end
+					if not s.closed then s.status:SetText((s.enabled and "Tracking" or "Stopped") .. (s.unconnected and " · live, data not saved - add your key on the website" or " · synced " .. os.date("%X"))) end
 				end
 			end)
 			s.busy = false
@@ -10900,7 +10900,7 @@ do
 			if data.expired then s.session = nil; return false, "Starting a fresh session after history cleanup" end
 			if data.rateLimited then return false, "Sync rate limited; retrying shortly", math.clamp(tonumber(data.retryAfter) or 15, 1, 15) end
 		end
-		-- Accounts not connected on the website are still tracked here, but nothing of theirs is saved
+		-- Accounts not connected on the website still count as live (the heartbeat), but none of their data is saved
 		s.unconnected = ok and type(data) == "table" and data.connected == false or nil
 		-- Changed inventories go to the Trackstat server, only when it changed since the last time it arrived there
 		local req = ok and inventory and not s.unconnected and httpRequest()
