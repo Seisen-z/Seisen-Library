@@ -10906,9 +10906,17 @@ do
 		local req = ok and inventory and not s.unconnected and httpRequest()
 		if req then
 			local body = HttpService:JSONEncode({ game = tostring(game.GameId), inventory = inventory })
-			if body ~= s.sentInventory then
+			if body ~= s.sentInventory and os.clock() >= (s.inventoryAt or 0) then
 				local sent, res = pcall(req, { Url = inventoryUrl, Method = "POST", Headers = { ["Content-Type"] = "application/json", ["X-Connection-Key"] = s.key }, Body = body })
-				if sent and type(res) == "table" and res.StatusCode and res.StatusCode >= 200 and res.StatusCode < 300 then s.sentInventory = body end
+				s.inventoryAt = os.clock() + 10
+				if sent and type(res) == "table" then
+					if res.StatusCode == 429 then
+						s.inventoryAt = os.clock() + math.clamp(tonumber(type(res.Headers) == "table" and (res.Headers["Retry-After"] or res.Headers["retry-after"])) or 10, 10, 120)
+					elseif res.StatusCode and res.StatusCode >= 200 and res.StatusCode < 300 then
+						local decoded, result = pcall(HttpService.JSONDecode, HttpService, res.Body)
+						if decoded and type(result) == "table" and result.ok and result.stored ~= false then s.sentInventory = body end
+					end
+				end
 			end
 		end
 		return ok, data
@@ -10931,16 +10939,10 @@ do
 		s.status = connection:AddLabel({ Text = s.enabled and "Detecting game - tracking starts automatically" or "This game is not supported by Trackstat" })
 		connection:AddLabel({ Text = self:_TrackstatSave() and "Key saved for this Roblox account on this device." or "No file storage: copy your key before closing this session." })
 		connection:AddButton({ Name = "Copy connection key", Callback = function()
-			if s.busy then return end
-			s.busy = true
-			local ok, err = self:_TrackstatConnect()
-			s.busy = false
 			if s.closed then return end
-			if ok then
-				local copy = setclipboard or toclipboard
-				local copied = copy and pcall(copy, s.key)
-				s.status:SetText(copied and "Key copied · paste it on the website Trackstat tab" or "Executor clipboard is unavailable")
-			else s.status:SetText(tostring(err)) end
+			local copy = setclipboard or toclipboard
+			local copied = copy and pcall(copy, s.key)
+			s.status:SetText(copied and "Key copied · paste it on the website Trackstat tab" or "Executor clipboard is unavailable")
 		end })
 		connection:AddButton({ Name = "Reset connection key", ConfirmText = "Click again to DELETE data and reset", Callback = function()
 			if s.busy then return end
@@ -10953,7 +10955,7 @@ do
 					ok, err = self:_TrackstatRPC("trackstat_reset_and_wipe", { p_key = s.key, p_new_key = s.pending })
 					if ok then
 						s.key, s.pending = s.pending, nil
-						s.session, s.snapshot, s.previous = nil, nil, nil
+						s.session, s.snapshot, s.previous, s.sentInventory, s.inventoryAt = nil, nil, nil, nil, nil
 						s.presenceSession, s.presenceAt, s.nextAt = HttpService:GenerateGUID(false), 0, 0
 						self:_TrackstatSave()
 					end

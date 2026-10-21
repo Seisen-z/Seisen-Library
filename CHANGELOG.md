@@ -1,4 +1,9 @@
-﻿## Oct 18, 2026
+﻿## Oct 22, 2026
+
+- Fixed delayed Trackstat key copying.
+- Fixed Trackstat upload retries.
+
+## Oct 18, 2026
 
 - Replaced FPS Boost and FPS Boost + with Startup Boost and Boost FPS.
 
