@@ -10598,7 +10598,7 @@ do
 				owned[metric] += amount
 				local perSecond = kind == "Unit" and config.income(attrs) or nil
 				if placed[uid] then income += perSecond or 0 end
-				table.insert(stacks, { k = key, a = amount, l = attrs.level, m = attrs.mutation and { attrs.mutation } or nil, gr = attrs.grade, tr = attrs.trait, lk = attrs.locked or nil, p = perSecond, c = kind == "Unit" and config.chance(attrs) or nil, pl = placed[uid] and 1 or nil, bf = buffList(config.buffs), d = config.duration, sl = config.slot, lm = config.luckMultiplier })
+				table.insert(stacks, { k = key, a = amount, l = attrs.level, m = attrs.mutation and { attrs.mutation } or nil, gr = attrs.grade, tr = attrs.trait, lk = attrs.locked or nil, p = perSecond, c = kind == "Unit" and type(config.chance) == "function" and config.chance(attrs) or nil, pl = placed[uid] and 1 or nil, bf = buffList(config.buffs), d = config.duration, sl = config.slot, lm = config.luckMultiplier })
 			end
 		end
 		table.sort(stacks, function(a, b) return (a.c or 0) > (b.c or 0) end)

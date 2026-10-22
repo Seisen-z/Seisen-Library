@@ -1,5 +1,6 @@
 ﻿## Oct 22, 2026
 
+- Fixed Anime Dice Trackstat inventory errors.
 - Fixed delayed Trackstat key copying.
 - Fixed Trackstat upload retries.
 
