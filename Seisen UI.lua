@@ -10905,8 +10905,9 @@ do
 		-- Changed inventories go to the Trackstat server, only when it changed since the last time it arrived there
 		local req = ok and inventory and not s.unconnected and httpRequest()
 		if req then
-			local body = HttpService:JSONEncode({ game = tostring(game.GameId), inventory = inventory })
-			if body ~= s.sentInventory and os.clock() >= (s.inventoryAt or 0) then
+			-- An inventory that cannot be encoded must not break a sync that Supabase already accepted
+			local encoded, body = pcall(HttpService.JSONEncode, HttpService, { game = tostring(game.GameId), inventory = inventory })
+			if encoded and body ~= s.sentInventory and os.clock() >= (s.inventoryAt or 0) then
 				local sent, res = pcall(req, { Url = inventoryUrl, Method = "POST", Headers = { ["Content-Type"] = "application/json", ["X-Connection-Key"] = s.key }, Body = body })
 				s.inventoryAt = os.clock() + 10
 				if sent and type(res) == "table" then
