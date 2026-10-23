@@ -4165,9 +4165,9 @@ function Window:Notify(o)
 		ZIndex = 0,
 		Parent = mover,
 	})
+	-- the card height is set from the measured text below; nested automatic sizing left wrapped text clipped on phones
 	local card = New("CanvasGroup", {
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 56),
 		BackgroundColor3 = Theme.Background,
 		BorderSizePixel = 0,
 		GroupTransparency = 1,
@@ -4175,7 +4175,7 @@ function Window:Notify(o)
 	})
 	Round(card, 10)
 	local stroke = Stroke(card, Theme.Stroke)
-	local content = New("Frame", { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, Parent = card })
+	local content = New("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = card })
 	Pad(content, 16, 16, 14, 24)
 	local offset = 0
 	if o.Icon then
@@ -4202,10 +4202,9 @@ function Window:Notify(o)
 		Tween(close, { TextColor3 = Theme.Muted }, 0.2)
 	end)
 	if o.Content then
-		Label({
+		local body = Label({
 			Position = UDim2.fromOffset(offset, 21),
-			Size = UDim2.new(1, -offset, 0, 0),
-			AutomaticSize = Enum.AutomaticSize.Y,
+			Size = UDim2.new(1, -offset, 0, 16),
 			Text = o.Content,
 			TextSize = 13,
 			FontFace = Fonts.Regular,
@@ -4215,6 +4214,13 @@ function Window:Notify(o)
 			TextYAlignment = Enum.TextYAlignment.Top,
 			Parent = content,
 		})
+		local function fit()
+			local textHeight = math.max(body.TextBounds.Y, 16)
+			body.Size = UDim2.new(1, -offset, 0, textHeight)
+			card.Size = UDim2.new(1, 0, 0, 61 + textHeight)
+		end
+		body:GetPropertyChangedSignal("TextBounds"):Connect(fit)
+		fit()
 	end
 	local barTrack = New("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 16, 1, -8), Size = UDim2.new(1, -32, 0, 3), BackgroundColor3 = Theme.Surface3, BorderSizePixel = 0, Parent = card })
 	Round(barTrack, 100)
@@ -4225,7 +4231,21 @@ function Window:Notify(o)
 		if slot.Parent then
 			-- AbsoluteSize is in screen pixels, the slot is laid out inside the scaled toast list
 			local scale = self.Toasts:FindFirstChildOfClass("UIScale")
-			Tween(slot, { Size = UDim2.new(1, 0, 0, card.AbsoluteSize.Y / math.max(scale and scale.Scale or 1, 0.05)) }, 0.3)
+			local function height()
+				return card.AbsoluteSize.Y / math.max(scale and scale.Scale or 1, 0.05)
+			end
+			Tween(slot, { Size = UDim2.new(1, 0, 0, height()) }, 0.3)
+			-- wrapped text can finish laying out after this point, so keep the slot as tall as the card
+			task.delay(0.3, function()
+				if slot.Parent and not slot.ClipsDescendants then
+					slot.Size = UDim2.new(1, 0, 0, height())
+					card:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+						if slot.Parent and not slot.ClipsDescendants then
+							slot.Size = UDim2.new(1, 0, 0, height())
+						end
+					end)
+				end
+			end)
 		end
 	end)
 	Tween(mover, { Position = UDim2.fromOffset(0, 0) }, 0.5, Enum.EasingStyle.Back)

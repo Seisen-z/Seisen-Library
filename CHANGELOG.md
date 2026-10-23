@@ -2,6 +2,7 @@
 
 - Fixed dropdown menus not matching the window size on small screens.
 - Fixed notifications overlapping each other on phones.
+- Fixed long notification text being cut off on phones.
 
 ## Oct 22, 2026
 
