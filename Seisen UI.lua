@@ -10770,8 +10770,8 @@ do
 							viewport = Instance.new("ViewportFrame")
 							viewport.Size, viewport.BackgroundTransparency, viewport.ImageTransparency = UDim2.fromOffset(96, 96), 1, 1
 							screen = Instance.new("ScreenGui")
-							screen.Name, screen.DisplayOrder = "SeisenTrackstatThumbnail", -2147483648
-							screen.Parent, viewport.Parent = game:GetService("CoreGui"), screen
+							screen.Name, screen.DisplayOrder, screen.IgnoreGuiInset, screen.ResetOnSpawn = "SeisenTrackstatThumbnail", -2147483648, true, false
+							screen.Parent, viewport.Parent = LocalPlayer:WaitForChild("PlayerGui", 5), screen
 							if config.kind == "Gear" then
 								model = Instance.new("Model")
 								model.Parent = viewport
@@ -10789,19 +10789,39 @@ do
 							model:ScaleTo(1)
 							model:PivotTo(CFrame.Angles(0, config.kind == "Gear" and math.rad((config.slot == "Back" and 0 or 180) + 25) or math.pi, 0))
 							model.Parent = viewport
-							local cf, size = model:GetBoundingBox()
+							-- Frame only what can be seen: invisible helper parts (floors, volumes) would shrink the character
+							local low, high
+							for _, part in ipairs(model:GetDescendants()) do
+								if part:IsA("BasePart") and part.Transparency < 0.95 then
+									for x = -1, 1, 2 do for y = -1, 1, 2 do for z = -1, 1, 2 do
+										local point = part.CFrame:PointToWorldSpace(Vector3.new(x * part.Size.X / 2, y * part.Size.Y / 2, z * part.Size.Z / 2))
+										low = low and low:Min(point) or point
+										high = high and high:Max(point) or point
+									end end end
+								end
+							end
+							assert(low, "Model has nothing visible")
+							local size, center = high - low, (low + high) / 2
 							local camera = Instance.new("Camera")
 							camera.FieldOfView = 30
-							camera.CFrame = CFrame.new(cf.Position + Vector3.new(0, 0, math.max(size.X, size.Y) / (2 * math.tan(math.rad(15))) + size.Z / 2), cf.Position)
+							camera.CFrame = CFrame.new(center + Vector3.new(0, 0, math.max(size.X, size.Y) / (2 * math.tan(math.rad(15))) * 1.08 + size.Z / 2), center)
 							camera.Parent, viewport.CurrentCamera = viewport, camera
-							task.wait(0.5)
+							-- Clothes and textures must be loaded first, or the snapshot shows a grey body
+							local preloaded, preloadStart = false, os.clock()
+							task.spawn(function() pcall(game:GetService("ContentProvider").PreloadAsync, game:GetService("ContentProvider"), { model }); preloaded = true end)
+							while not preloaded and os.clock() - preloadStart < 4 do task.wait(0.05) end
+							task.wait(0.2)
 							source = assets:CreateEditableImageAsync(Content.fromUri(viewport:CaptureSnapshotAsync()))
 						else
 							source = assets:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. icon))
 						end
 						target = assets:CreateEditableImage({ Size = Vector2.new(96, 96) })
 						target:DrawImageTransformed(Vector2.new(48, 48), Vector2.new(96 / source.Size.X, 96 / source.Size.Y), 0, source, { CombineType = Enum.ImageCombineType.Overwrite })
-						local png = encodePng(96, buffer.tostring(target:ReadPixelsBuffer(Vector2.zero, target.Size)))
+						local pixels = buffer.tostring(target:ReadPixelsBuffer(Vector2.zero, target.Size))
+						local solid = 0
+						for i = 4, #pixels, 4 do if pixels:byte(i) > 16 then solid += 1 end end
+						assert(solid >= 300, "Picture is empty")
+						local png = encodePng(96, pixels)
 						if s.closed then return end
 						local result = req({ Url = imagesUrl .. "trackstats-images/" .. folder .. "/" .. icon .. ".png", Method = "POST", Headers = { apikey = publicKey, ["Content-Type"] = "image/png" }, Body = png })
 						success = type(result) == "table" and result.StatusCode and (result.StatusCode >= 200 and result.StatusCode < 300 or result.StatusCode == 409)
@@ -10809,7 +10829,7 @@ do
 					s.imaged[icon] = success or nil
 					finished = true
 				end)
-				while not finished and not s.closed and os.clock() - started < 6 do task.wait(0.1) end
+				while not finished and not s.closed and os.clock() - started < 9 do task.wait(0.1) end
 				if not finished then task.cancel(worker); s.imaged[icon] = nil end
 				if source then source:Destroy() end
 				if target then target:Destroy() end
