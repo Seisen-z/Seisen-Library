@@ -1982,6 +1982,9 @@ function Container:Dropdown(o)
 	-- popup
 	local OPTION_H, MAX_ROWS = 28, o.MaxRows or 6
 	local pop = New("Frame", { AnchorPoint = Vector2.new(1, 0), Size = UDim2.fromOffset(220, 0), BackgroundTransparency = 1, Visible = false, ZIndex = 45, Parent = win.Gui })
+	-- the popup lives outside the window, so it follows the window's scale itself
+	local popScale = New("UIScale", { Parent = pop })
+	local function winScale() return math.max(win.RootScale.Scale, 0.05) end
 	local shadow = New("ImageLabel", {
 		Position = UDim2.fromOffset(-18, -12),
 		Size = UDim2.new(1, 36, 1, 36),
@@ -2144,8 +2147,9 @@ function Container:Dropdown(o)
 		list.CanvasSize = UDim2.fromOffset(0, math.max(count, 1) * (OPTION_H + 2) - 2)
 		list.Position = UDim2.fromOffset(0, y)
 		list.Size = UDim2.new(1, 0, 0, listHeight)
-		local width = math.max(chip.AbsoluteSize.X, o.PopupWidth or 210)
-		popSize = Vector2.new(math.min(width, win.Gui.AbsoluteSize.X - 16), y + listHeight + 16)
+		local s = winScale()
+		local width = math.max(chip.AbsoluteSize.X / s, o.PopupWidth or 210)
+		popSize = Vector2.new(math.min(width, (win.Gui.AbsoluteSize.X - 16) / s), y + listHeight + 16)
 		inner.Size = UDim2.new(1, 0, 0, popSize.Y)
 		if handle.Open then
 			if instant then
@@ -2243,10 +2247,13 @@ function Container:Dropdown(o)
 			handle:SetOpen(false)
 			return
 		end
+		local s = winScale()
+		popScale.Scale = s
+		local shown = popSize * s
 		local origin = chip.AbsolutePosition - win.Gui.AbsolutePosition
-		local right = math.clamp(origin.X + chip.AbsoluteSize.X, popSize.X + 8, math.max(screen.X - 8, popSize.X + 8))
+		local right = math.clamp(origin.X + chip.AbsoluteSize.X, shown.X + 8, math.max(screen.X - 8, shown.X + 8))
 		local below = origin.Y + chip.AbsoluteSize.Y + 6
-		if below + popSize.Y > screen.Y - 8 and origin.Y - 6 - popSize.Y >= 8 then
+		if below + shown.Y > screen.Y - 8 and origin.Y - 6 - shown.Y >= 8 then
 			pop.AnchorPoint = Vector2.new(1, 1)
 			pop.Position = UDim2.fromOffset(right, origin.Y - 6)
 			card.AnchorPoint = Vector2.new(0, 1)
@@ -4216,7 +4223,9 @@ function Window:Notify(o)
 
 	task.defer(function()
 		if slot.Parent then
-			Tween(slot, { Size = UDim2.new(1, 0, 0, card.AbsoluteSize.Y) }, 0.3)
+			-- AbsoluteSize is in screen pixels, the slot is laid out inside the scaled toast list
+			local scale = self.Toasts:FindFirstChildOfClass("UIScale")
+			Tween(slot, { Size = UDim2.new(1, 0, 0, card.AbsoluteSize.Y / math.max(scale and scale.Scale or 1, 0.05)) }, 0.3)
 		end
 	end)
 	Tween(mover, { Position = UDim2.fromOffset(0, 0) }, 0.5, Enum.EasingStyle.Back)

@@ -1,4 +1,9 @@
-﻿## Oct 22, 2026
+﻿## Oct 23, 2026
+
+- Fixed dropdown menus not matching the window size on small screens.
+- Fixed notifications overlapping each other on phones.
+
+## Oct 22, 2026
 
 - Fixed Anime Dice Trackstat inventory errors.
 - Fixed delayed Trackstat key copying.
