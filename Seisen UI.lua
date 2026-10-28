@@ -10459,7 +10459,7 @@ do
 	end
 	local function counts(gameId)
 		if gameId == ANIME_DICE then return { units = 0, boosts = 0, gear = 0, items = 0 } end
-		if gameId == TAP_SIMULATOR then return { normal = 0, golden = 0, diamond = 0, rainbow = 0, items = 0, potions = 0 } end
+		if gameId == TAP_SIMULATOR then return { secret1 = 0, secret2 = 0, secret3 = 0, secretx = 0, items = 0, potions = 0 } end
 		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
 	end
 
@@ -10530,16 +10530,16 @@ do
 		local data, current, owned, catalog, stacks = replica.Data, {}, counts(TAP_SIMULATOR), {}, {}
 		local function add(key, kind, metric, amount, name, icon, rarity, description)
 			catalog[key] = { key = key, kind = kind, name = name:sub(1, 100), icon = icon, rarity = rarity, description = tostring(description or ""):sub(1, 300) }
-			current[key] = current[key] or { name = catalog[key].name, kind = kind, metric = metric, owned = 0 }
+			current[key] = current[key] or { name = catalog[key].name, kind = kind == "pet" and metric or kind, metric = metric, owned = 0 }
 			current[key].owned += amount
 			owned[metric] += amount
 		end
 		for _, pet in pairs(data.Pets.Owned) do
 			local tier = pet.Tier or "Normal"
-			local metric = tier == "Shiny" and "rainbow" or tier:lower()
+			local metric = pet.Rarity == "Secret I" and "secret1" or pet.Rarity == "Secret II" and "secret2" or pet.Rarity == "Secret III" and "secret3" or pet.Rarity == "Secret X" and "secretx" or nil
 			local key = "pet:" .. pet.Name .. ":" .. tier
 			local name = (tier == "Normal" and "" or tier == "Shiny" and "Rainbow " or tier .. " ") .. pet.Name
-			if owned[metric] ~= nil then add(key, "pet", metric, 1, name, modelIcon(key), pet.Rarity) end
+			if metric then add(key, "pet", metric, 1, name, modelIcon(key), pet.Rarity) end
 		end
 		for id, amount in pairs(data.Items.Owned) do
 			if amount > 0 then
@@ -10554,8 +10554,8 @@ do
 		while #stacks > 1000 do table.remove(stacks) end
 		local details = self:_TrackstatDelta(s, current)
 		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details, inventory = stacks, coins = data.Currencies.Coins, gems = data.Currencies.Gems, candy_corn = data.Currencies.CandyCorn or 0, rebirths = data.Statistics.Rebirths }
-		if s.stopping or os.clock() >= s.uploadAt then s.catalog = catalog end
-		s.summaryText = string.format("Coins: %s · Gems: %s · Candy Corn: %s · Rebirths: %s\nPets: %s Normal · %s Golden · %s Diamond · %s Rainbow\nItems: %s · Potions: %s", FormatCount(s.snapshot.coins), FormatCount(s.snapshot.gems), FormatCount(s.snapshot.candy_corn), FormatCount(s.snapshot.rebirths), FormatCount(owned.normal), FormatCount(owned.golden), FormatCount(owned.diamond), FormatCount(owned.rainbow), FormatCount(owned.items), FormatCount(owned.potions))
+		self:_TrackstatQueueCatalog(s, catalog)
+		s.summaryText = string.format("Coins: %s · Gems: %s · Candy Corn: %s · Rebirths: %s\nPets: %s Secret 1 · %s Secret 2 · %s Secret 3 · %s Secret X\nItems: %s · Potions: %s", FormatCount(s.snapshot.coins), FormatCount(s.snapshot.gems), FormatCount(s.snapshot.candy_corn), FormatCount(s.snapshot.rebirths), FormatCount(owned.secret1), FormatCount(owned.secret2), FormatCount(owned.secret3), FormatCount(owned.secretx), FormatCount(owned.items), FormatCount(owned.potions))
 	end
 
 	function Lib:_TrackstatReadAnimeDice()
@@ -10596,7 +10596,7 @@ do
 		while #stacks > 1000 do table.remove(stacks) end
 		local details = self:_TrackstatDelta(s, current)
 		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details, inventory = stacks, money = s.data.Money(), rolls = s.data.Rolls(), rebirths = s.data.Rebirth(), per_second = income }
-		if s.stopping or os.clock() >= s.uploadAt then s.catalog = catalog end
+		self:_TrackstatQueueCatalog(s, catalog)
 		s.summaryText = string.format("Money: %s · Rolls: %s · Rebirths: %s\nOwned: %s units · %s boosts · %s gear · %s items\nSession gains: %s units · %s boosts · %s gear · %s items", FormatCount(s.snapshot.money), FormatCount(s.snapshot.rolls), FormatCount(s.snapshot.rebirths), FormatCount(owned.units), FormatCount(owned.boosts), FormatCount(owned.gear), FormatCount(owned.items), FormatCount(s.gained.units), FormatCount(s.gained.boosts), FormatCount(s.gained.gear), FormatCount(s.gained.items))
 	end
 
@@ -10639,7 +10639,11 @@ do
 			end
 		end
 		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = self:_TrackstatDelta(s, current) }
-		if s.stopping or os.clock() >= s.uploadAt then s.stacks, s.catalog = self:_TrackstatInventory(s) end
+		if s.stopping or os.clock() >= s.uploadAt then
+			local catalog
+			s.stacks, catalog = self:_TrackstatInventory(s)
+			self:_TrackstatQueueCatalog(s, catalog)
+		end
 		s.snapshot.inventory = s.stacks
 		s.summaryText = string.format("Owned: %s items · %s Huge · %s Titanic · %s Gargantuan\nSession gains: %s items · %s Huge · %s Titanic · %s Gargantuan", FormatCount(owned.items), FormatCount(owned.huge), FormatCount(owned.titanic), FormatCount(owned.gargantuan), FormatCount(s.gained.items), FormatCount(s.gained.huge), FormatCount(s.gained.titanic), FormatCount(s.gained.gargantuan))
 	end
@@ -10819,6 +10823,13 @@ do
 		if identity and setthreadidentity then pcall(setthreadidentity, identity) end
 	end
 
+	function Lib:_TrackstatQueueCatalog(s, catalog)
+		s.catalog = s.catalog or {}
+		for key, item in pairs(catalog) do
+			if not s.known[key] or (item.icon ~= "" and not s.imaged[item.icon]) then s.catalog[key] = item end
+		end
+	end
+
 	function Lib:_TrackstatCatalog(s)
 		local catalog = s.catalog
 		local keys = {}
@@ -10838,7 +10849,10 @@ do
 			for _, key in ipairs(keys) do s.known[key] = true end
 		end
 		self:_TrackstatImages(s, catalog)
-		if s.catalog == catalog then s.catalog = nil end
+		for key, item in pairs(catalog) do
+			if s.known[key] and (item.icon == "" or s.imaged[item.icon]) then catalog[key] = nil end
+		end
+		if s.catalog == catalog and not next(catalog) then s.catalog = nil end
 	end
 
 	function Lib:_TrackstatClose(s)
@@ -11004,7 +11018,7 @@ do
 			section:SetCollapsed(true)
 		end
 		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
-		addGame(tab:AddRightSection("Tap Simulator", "mouse-pointer-click"), TAP_SIMULATOR, "Normal, Golden, Diamond and Rainbow pets, items, potions, coins, gems, Candy Corn and rebirths. Existing inventory is not a gain; trades and rewards count as inventory increases.")
+		addGame(tab:AddRightSection("Tap Simulator", "mouse-pointer-click"), TAP_SIMULATOR, "Secret 1, Secret 2, Secret 3 and Secret X pets, items, potions, coins, gems, Candy Corn and rebirths. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 		addGame(tab:AddRightSection("Anime Dice", "dices"), ANIME_DICE, "Units with levels, mutations, grades and traits, boosts, gear and items including tokens. Money, placed-unit income, rolls and rebirths. Checks run every 5 seconds and sync every 30 seconds. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 	end
 end
