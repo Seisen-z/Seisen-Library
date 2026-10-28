@@ -1,3 +1,7 @@
+# 2026-10-28
+
+- Replaced Steal an Egg Trackstat with Tap Simulator stats.
+
 ﻿## Oct 23, 2026
 
 - Fixed dropdown menus not matching the window size on small screens.

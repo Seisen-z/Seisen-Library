@@ -10451,7 +10451,7 @@ do
 	local function newKey()
 		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
 	end
-	local PET_SIMULATOR_99, STEAL_AN_EGG, ANIME_DICE = 3317771874, 10563114921, 10708913337
+	local PET_SIMULATOR_99, TAP_SIMULATOR, ANIME_DICE = 3317771874, 10629695169, 10708913337
 	local function modelIcon(key)
 		local a, b = 5381, 0
 		for i = 1, #key do a = (a * 33 + key:byte(i)) % 4294967296; b = (b * 31 + key:byte(i)) % 1000000000 end
@@ -10459,7 +10459,7 @@ do
 	end
 	local function counts(gameId)
 		if gameId == ANIME_DICE then return { units = 0, boosts = 0, gear = 0, items = 0 } end
-		if gameId == STEAL_AN_EGG then return { pets = 0, eggs = 0, gear = 0, items = 0 } end
+		if gameId == TAP_SIMULATOR then return { normal = 0, golden = 0, diamond = 0, rainbow = 0, items = 0, potions = 0 } end
 		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
 	end
 
@@ -10522,79 +10522,41 @@ do
 		return details
 	end
 
-	-- Steal An Egg keeps everything in the game's own save data (pets, eggs, gear, items, money, speed)
-	function Lib:_TrackstatReadStealAnEgg()
+	function Lib:_TrackstatReadTapSimulator()
 		local s = self._trackstat
 		if setthreadidentity then pcall(setthreadidentity, 2) end
-		local data, owned, current, catalog, stacks, tools = s.save.Peek(), { pets = 0, eggs = 0, gear = 0, items = 0 }, {}, {}, {}, {}
-		for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
-			local uid = tool:GetAttribute("UID")
-			if uid then tools[uid] = tool end
-		end
-		local function add(kind, key, amount, name, icon, rarity, description)
-			if not catalog[key] then
-				catalog[key] = { key = key, kind = kind, name = tostring(name):sub(1, 100), icon = tostring(icon or ""):match("%d+") or "", description = tostring(description or ""):sub(1, 300) }
-				rarity = type(rarity) == "string" and s.rarities[rarity] or rarity
-				if rarity then catalog[key].rarity, catalog[key].rarity_num, catalog[key].rarity_color = rarity.DisplayName, rarity.Rank, "#" .. rarity.Color:ToHex() end
-			end
-			local metric = ({ pet = "pets", egg = "eggs", gear = "gear", item = "items" })[kind]
+		local replica = s.data:GetReplica()
+		assert(replica and replica.Data, "Inventory is not ready; retrying shortly")
+		local data, current, owned, catalog, stacks = replica.Data, {}, counts(TAP_SIMULATOR), {}, {}
+		local function add(key, kind, metric, amount, name, icon, rarity, description)
+			catalog[key] = { key = key, kind = kind, name = name:sub(1, 100), icon = icon, rarity = rarity, description = tostring(description or ""):sub(1, 300) }
 			current[key] = current[key] or { name = catalog[key].name, kind = kind, metric = metric, owned = 0 }
 			current[key].owned += amount
 			owned[metric] += amount
 		end
-		local function mutationList(mutations)
-			local list = {}
-			for _, mutation in pairs(mutations or {}) do table.insert(list, mutation) end
-			table.sort(list)
-			return #list > 0 and list or nil
+		for _, pet in pairs(data.Pets.Owned) do
+			local tier = pet.Tier or "Normal"
+			local metric = tier == "Shiny" and "rainbow" or tier:lower()
+			local key = "pet:" .. pet.Name .. ":" .. tier
+			local name = (tier == "Normal" and "" or tier == "Shiny" and "Rainbow " or tier .. " ") .. pet.Name
+			if owned[metric] ~= nil then add(key, "pet", metric, 1, name, modelIcon(key), pet.Rarity) end
 		end
-		local placed = {}
-		for _, uid in ipairs(data.EquippedAssets or {}) do placed[uid] = true end
-		local okE, earnings = pcall(require, game.ReplicatedStorage.Shared.Util.AssetEarnings)
-		local function rateOf(pet) -- placed pets have no backpack tool, so their income comes from the game's own formula
-			if not okE then return nil end
-			local ok, rate = pcall(earnings.LiveRatePerSecond, { Category = pet.Category, Scale = math.max(tonumber(pet.Scale) or 1, 0.01), Mutations = type(pet.Mutations) == "table" and pet.Mutations or {} }, data.Gamepasses, data.Products)
-			return ok and type(rate) == "number" and rate or nil
-		end
-		for uid, pet in pairs(data.Inventory) do
-			local dir, tool = s.assets[pet.Category], tools[uid]
-			local config = tool and tool:FindFirstChild("Configuration")
-			local key = "pet:" .. pet.Category
-			add("pet", key, 1, dir and dir.DisplayName or pet.Category, dir and dir.Icon, dir and dir.Rarity)
-			table.insert(stacks, { k = key, a = 1, w = dir and dir.ModelWeight and dir.ModelWeight * (pet.Scale or 1) or nil, m = mutationList(pet.Mutations), p = config and config:GetAttribute("perSecond") or rateOf(pet), f = tool and tool:GetAttribute("Favorite") or nil, pl = placed[uid] and 1 or nil })
-		end
-		for _, egg in pairs(data.EggInventory) do
-			local dir = s.assets[egg.AssetCategory]
-			local info, key = dir and dir.Egg, "egg:" .. egg.AssetCategory
-			add("egg", key, 1, info and info.DisplayName or egg.AssetCategory .. " Egg", info and info.Icon, dir and dir.Rarity)
-			table.insert(stacks, { k = key, a = 1, w = info and info.WeightKg, m = mutationList(egg.Mutations), pl = egg.Placement and 1 or nil })
-		end
-		for id, amount in pairs(data.GearInventory) do
-			local gear, key = s.gears[id], "gear:" .. id
-			add("gear", key, amount, gear and gear.DisplayName or id, gear and gear.Icon, gear and gear.Rarity, gear and gear.Description)
-			table.insert(stacks, { k = key, a = amount })
-		end
-		for _, item in ipairs({
-			{ "BossTokens", data.BossTokens, s.currency.BossTokens },
-			{ "SakuraCrystals", data.SakuraCrystals, s.currency.SakuraCrystals },
-			{ "MutationConsumable", data.BossMastery and data.BossMastery.MutationConsumables, nil, "Mutation Consumable" },
-			{ "NitroConsumable", data.RaceRally and data.RaceRally.MutationConsumables, nil, "Nitro Consumable" },
-		}) do
-			local amount, dir, key = item[2] or 0, item[3], "item:" .. item[1]
+		for id, amount in pairs(data.Items.Owned) do
 			if amount > 0 then
-				add("item", key, amount, dir and dir.DisplayName or item[4], dir and dir.Icon, dir and dir.Rarity)
-				table.insert(stacks, { k = key, a = amount })
+				local item = s.items.Get(id)
+				local potion = item and item.data and item.data.Type == "Boost"
+				local kind = potion and "potion" or "item"
+				add(kind .. ":" .. id, kind, potion and "potions" or "items", amount, item and item.Name or id, tostring(item and item.Image or ""):match("%d+") or "", item and item.Rarity, item and item.Description)
 			end
 		end
-		table.sort(stacks, function(a, b) return (a.p or 0) > (b.p or 0) end)
+		for key, item in pairs(current) do table.insert(stacks, { k = key, a = item.owned }) end
+		table.sort(stacks, function(a, b) return a.a == b.a and a.k < b.k or a.a > b.a end)
 		while #stacks > 1000 do table.remove(stacks) end
-		local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
-		local perSecond = leaderstats and leaderstats:FindFirstChild("Money/s")
-		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = self:_TrackstatDelta(s, current), inventory = stacks, money = data.Money, speed = data.SpeedPower, per_second = perSecond and perSecond.Value or 0 }
+		local details = self:_TrackstatDelta(s, current)
+		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details, inventory = stacks, coins = data.Currencies.Coins, gems = data.Currencies.Gems, candy_corn = data.Currencies.CandyCorn or 0, rebirths = data.Statistics.Rebirths }
 		if s.stopping or os.clock() >= s.uploadAt then s.catalog = catalog end
-		s.summaryText = string.format("Money: %s · Speed: %s · %s/s\nOwned: %s pets · %s eggs · %s gear · %s items\nSession gains: %s pets · %s eggs · %s gear · %s items", FormatCount(data.Money), FormatCount(data.SpeedPower), FormatCount(s.snapshot.per_second), FormatCount(owned.pets), FormatCount(owned.eggs), FormatCount(owned.gear), FormatCount(owned.items), FormatCount(s.gained.pets), FormatCount(s.gained.eggs), FormatCount(s.gained.gear), FormatCount(s.gained.items))
+		s.summaryText = string.format("Coins: %s · Gems: %s · Candy Corn: %s · Rebirths: %s\nPets: %s Normal · %s Golden · %s Diamond · %s Rainbow\nItems: %s · Potions: %s", FormatCount(s.snapshot.coins), FormatCount(s.snapshot.gems), FormatCount(s.snapshot.candy_corn), FormatCount(s.snapshot.rebirths), FormatCount(owned.normal), FormatCount(owned.golden), FormatCount(owned.diamond), FormatCount(owned.rainbow), FormatCount(owned.items), FormatCount(owned.potions))
 	end
-
 
 	function Lib:_TrackstatReadAnimeDice()
 		local s = self._trackstat
@@ -10648,10 +10610,10 @@ do
 				require(rs.Framework.Features.Inventory.EntryTypes)
 				s.registry = require(rs.Framework.Features.Inventory.EntryRegistry)
 				assert(type(s.data.Inventory()) == "table", "Inventory is not ready; retrying shortly")
-			elseif s.gameId == STEAL_AN_EGG then
-				s.save, s.assets, s.gears = require(rs.Shared.Save), require(rs.Data.Assets).Directory, require(rs.Data.Gears).Directory
-				s.rarities, s.currency = require(rs.Data.Rarity).Rarities, require(rs.Data.Currency).Directory
-				assert(s.save.IsLoaded(), "Inventory is not ready; retrying shortly")
+			elseif s.gameId == TAP_SIMULATOR then
+				s.data = require(rs.Controllers.Core.DataController)
+				s.items = require(rs.Shared.Items.ItemCatalog)
+				assert(s.data:GetReplica(), "Inventory is not ready; retrying shortly")
 			else
 				s.inventory = require(rs.Library.Universal.Inventory)
 			end
@@ -10659,7 +10621,7 @@ do
 			s.session, s.sequence, s.uploadAt = HttpService:GenerateGUID(false), 0, 0
 		end
 		if s.gameId == ANIME_DICE then return self:_TrackstatReadAnimeDice() end
-		if s.gameId == STEAL_AN_EGG then return self:_TrackstatReadStealAnEgg() end
+		if s.gameId == TAP_SIMULATOR then return self:_TrackstatReadTapSimulator() end
 		local current, owned = {}, counts()
 		for _, item in pairs(s.inventory.Container(LocalPlayer):All()) do
 			local kind = item.Class.Name
@@ -10743,7 +10705,7 @@ do
 	local imagesUrl = "https://xsygxfeutjcwmqejslbv.supabase.co/storage/v1/object/"
 	function Lib:_TrackstatImages(s, catalog)
 		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
-		local folder = s.gameId == ANIME_DICE and "animedice" or s.gameId == STEAL_AN_EGG and "stealanegg" or "petsimulator99"
+		local folder = s.gameId == ANIME_DICE and "animedice" or s.gameId == TAP_SIMULATOR and "tapsimulator" or "petsimulator99"
 		local icons = {}
 		for _, item in pairs(catalog) do if item.icon ~= "" and not s.imaged[item.icon] then table.insert(icons, item.icon) end end
 		if #icons == 0 or s.closed then return end
@@ -10758,11 +10720,27 @@ do
 				budget -= 1
 				s.imaged[icon] = true
 				local finished, started = false, os.clock()
-				local source, target, viewport, screen
+				local source, target, viewport, screen, petImage, petRenderer
 				local worker = task.spawn(function()
 					local success = false
 					pcall(function()
-						if s.gameId == ANIME_DICE and icon:sub(1, 1) == "0" then
+						if s.gameId == TAP_SIMULATOR and icon:sub(1, 1) == "0" then
+							if setthreadidentity then pcall(setthreadidentity, 2) end
+							petRenderer = require(game.ReplicatedStorage.Modules.Client.Pets.PetIconViewport)
+							local name, tier = item.key:match("^pet:(.*):([^:]+)$")
+							screen = Instance.new("ScreenGui")
+							screen.Name, screen.ResetOnSpawn = "SeisenTrackstatThumbnail", false
+							screen.Parent = LocalPlayer:WaitForChild("PlayerGui", 5)
+							petImage = Instance.new("ImageLabel")
+							petImage.Size, petImage.BackgroundTransparency, petImage.Parent = UDim2.fromOffset(96, 96), 1, screen
+							petRenderer.Attach(petImage, { Name = name, Tier = tier }, { Still = true, Entrance = false })
+							local started = os.clock()
+							repeat viewport = petImage:FindFirstChild("PetViewport"); task.wait(0.1) until viewport or s.closed or os.clock() - started >= 4
+							assert(viewport, "Pet picture is not ready")
+							task.wait(2)
+							if setthreadidentity then pcall(setthreadidentity, 8) end
+							source = assets:CreateEditableImageAsync(Content.fromUri(viewport:CaptureSnapshotAsync()))
+						elseif s.gameId == ANIME_DICE and icon:sub(1, 1) == "0" then
 							local config = s.registry.getEntryConfig(item.name)
 							local model
 							if config.kind == "Unit" then model = config.model() end
@@ -10833,6 +10811,7 @@ do
 				if not finished then task.cancel(worker); s.imaged[icon] = nil end
 				if source then source:Destroy() end
 				if target then target:Destroy() end
+				if petImage and petRenderer then pcall(petRenderer.Detach, petImage) end
 				if viewport then viewport:Destroy() end
 				if screen then screen:Destroy() end
 			end
@@ -10845,7 +10824,7 @@ do
 		local keys = {}
 		for key in pairs(catalog) do if not s.known[key] then table.insert(keys, key) end end
 		if #keys > 0 then
-			local prefix = s.gameId == ANIME_DICE and "trackstats_animedice_catalog_" or s.gameId == STEAL_AN_EGG and "trackstats_stealanegg_catalog_" or "trackstat_catalog_"
+			local prefix = s.gameId == ANIME_DICE and "trackstats_animedice_catalog_" or s.gameId == TAP_SIMULATOR and "trackstats_tapsimulator_catalog_" or "trackstat_catalog_"
 			local ok, missing = self:_TrackstatRPC(prefix .. "missing", { p_keys = keys })
 			if not ok then error(missing, 0) end
 			if s.closed then return end
@@ -10982,7 +10961,7 @@ do
 		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
 		local s = self._trackstat
 		if not s or s.closed then
-			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == STEAL_AN_EGG or game.GameId == ANIME_DICE, busy = false, nextAt = 0, known = {}, imaged = {} }
+			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == TAP_SIMULATOR or game.GameId == ANIME_DICE, busy = false, nextAt = 0, known = {}, imaged = {} }
 			self._trackstat = s
 		end
 		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
@@ -11025,7 +11004,7 @@ do
 			section:SetCollapsed(true)
 		end
 		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
-		addGame(tab:AddRightSection("Steal an Egg", "egg"), STEAL_AN_EGG, "Money, speed, pets with their weight and mutations, eggs, gear and items. Checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards. The website shows private history and anonymous community totals.")
+		addGame(tab:AddRightSection("Tap Simulator", "mouse-pointer-click"), TAP_SIMULATOR, "Normal, Golden, Diamond and Rainbow pets, items, potions, coins, gems, Candy Corn and rebirths. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 		addGame(tab:AddRightSection("Anime Dice", "dices"), ANIME_DICE, "Units with levels, mutations, grades and traits, boosts, gear and items including tokens. Money, placed-unit income, rolls and rebirths. Checks run every 5 seconds and sync every 30 seconds. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 	end
 end
