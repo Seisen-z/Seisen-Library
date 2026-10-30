@@ -8549,8 +8549,11 @@ function Window:_buildServerHop(tab)
 		state.reconnectAt = os.clock() + 3
 		status:SetText("Disconnected. Reconnecting in 3 seconds...")
 	end
-	self:_listen(GuiService.ErrorMessageChanged, function(message)
-		if message and #message > 0 then reconnect() end
+	-- Connecting this signal needs full permissions; a script that left the thread at a lower identity (e.g. right after a server hop) must not stop the window from building.
+	pcall(function()
+		self:_listen(GuiService.ErrorMessageChanged, function(message)
+			if message and #message > 0 then reconnect() end
+		end)
 	end)
 	self:_listen(TeleportService.TeleportInitFailed, function(player)
 		if player == LocalPlayer then state.failed = true end
@@ -9578,10 +9581,12 @@ function Library:_BuildConfigTab(window)
                 end
 
                 local GuiService = game:GetService("GuiService")
-                autoRejoinConn2 = GuiService.ErrorMessageChanged:Connect(function(message)
-                    if autoRejoin and message ~= "" then
-                        task.spawn(doRejoin)
-                    end
+                pcall(function()
+                    autoRejoinConn2 = GuiService.ErrorMessageChanged:Connect(function(message)
+                        if autoRejoin and message ~= "" then
+                            task.spawn(doRejoin)
+                        end
+                    end)
                 end)
             else
                 if autoRejoinConn1 then
