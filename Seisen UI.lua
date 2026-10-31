@@ -8550,7 +8550,7 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 local players, limit = game:GetService("Players"), os.clock() + 90
 while not players.LocalPlayer do task.wait() end
 while not players.LocalPlayer.Character and os.clock() < limit do task.wait(0.25) end
-task.wait(10)
+task.wait(8)
 loadstring(game:HttpGet(%q))()
 ]]):format(self.ScriptUrl))
 	end
