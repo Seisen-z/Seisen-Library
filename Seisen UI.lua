@@ -8547,10 +8547,10 @@ function Window:_buildServerHop(tab)
 		-- them leaves them broken for good ("Requested module experienced an error while loading"), so it waits for the game first
 		armed = pcall(queue, ([[
 if not game:IsLoaded() then game.Loaded:Wait() end
-local players, deadline = game:GetService("Players"), os.clock() + 60
+local players, limit = game:GetService("Players"), os.clock() + 90
 while not players.LocalPlayer do task.wait() end
-while not players.LocalPlayer.Character and os.clock() < deadline do task.wait(0.25) end
-task.wait(8)
+while not players.LocalPlayer.Character and os.clock() < limit do task.wait(0.25) end
+task.wait(10)
 loadstring(game:HttpGet(%q))()
 ]]):format(self.ScriptUrl))
 	end
