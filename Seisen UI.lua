@@ -416,11 +416,13 @@ local function New(class, props)
 end
 
 local function Tween(obj, props, time, style, dir)
-	local t = TweenService:Create(
-		obj,
-		TweenInfo.new(time or 0.2, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out),
-		props
-	)
+	local info = TweenInfo.new(time or 0.2, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out)
+	local ok, t = pcall(TweenService.Create, TweenService, obj, info, props)
+	if not ok then
+		-- A thread left at a low identity can't tween the UI ("lacking capability Plugin")
+		if setthreadidentity then pcall(setthreadidentity, 8) end
+		t = TweenService:Create(obj, info, props)
+	end
 	t:Play()
 	return t
 end

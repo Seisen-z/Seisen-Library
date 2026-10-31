@@ -1,3 +1,7 @@
+# 2026-11-01
+
+- Fixed UI tween errors ("lacking capability Plugin") when the thread identity is too low.
+
 # 2026-10-29
 
 - Fixed Trackstat thumbnails and image retries.
