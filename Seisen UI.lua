@@ -10607,11 +10607,29 @@ do
 		s.summaryText = string.format("Money: %s · Rolls: %s · Rebirths: %s\nOwned: %s units · %s boosts · %s gear · %s items\nSession gains: %s units · %s boosts · %s gear · %s items", FormatCount(s.snapshot.money), FormatCount(s.snapshot.rolls), FormatCount(s.snapshot.rebirths), FormatCount(owned.units), FormatCount(owned.boosts), FormatCount(owned.gear), FormatCount(owned.items), FormatCount(s.gained.units), FormatCount(s.gained.boosts), FormatCount(s.gained.gear), FormatCount(s.gained.items))
 	end
 
+	-- Requiring a game module before the game has loaded it can leave it broken for the game too ("Requested module experienced
+	-- an error while loading"), which is what happened right after a server hop. Wait until the game has loaded it itself.
+	local trackstatStart = os.clock()
+	local function gameLoaded(...)
+		if os.clock() - trackstatStart > 60 then return true end
+		if not game:IsLoaded() then return false end
+		if not getloadedmodules then return os.clock() - trackstatStart > 30 end
+		local loaded = getloadedmodules()
+		for _, module in ipairs({ ... }) do
+			if not table.find(loaded, module) then return false end
+		end
+		return true
+	end
+
 	function Lib:_TrackstatRead()
 		local s = self._trackstat
 		if not s.session then
-			if setthreadidentity then pcall(setthreadidentity, 2) end
 			local rs = game.ReplicatedStorage
+			local needed = s.gameId == ANIME_DICE and { rs:FindFirstChild("Framework") and rs.Framework.Features.Data.DataController }
+				or s.gameId == TAP_SIMULATOR and { rs:FindFirstChild("Controllers") and rs.Controllers.Core.DataController }
+				or { rs:FindFirstChild("Library") and rs.Library.Universal.Inventory }
+			assert(gameLoaded(table.unpack(needed)), "Game is still loading; retrying shortly")
+			if setthreadidentity then pcall(setthreadidentity, 2) end
 			if s.gameId == ANIME_DICE then
 				s.data = require(rs.Framework.Features.Data.DataController)
 				require(rs.Framework.Features.Inventory.EntryTypes)
