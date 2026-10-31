@@ -8543,7 +8543,16 @@ function Window:_buildServerHop(tab)
 			Lib:Notify({ Title = "Auto Execute", Content = type(queue) ~= "function" and "Teleport queue is unavailable in this executor." or "No script URL is available for this game.", Type = "warning" })
 			return
 		end
-		armed = pcall(queue, ("loadstring(game:HttpGet(%q))()"):format(self.ScriptUrl))
+		-- The queued code starts the moment the new server does. A script that requires game modules before the game has loaded
+		-- them leaves them broken for good ("Requested module experienced an error while loading"), so it waits for the game first
+		armed = pcall(queue, ([[
+if not game:IsLoaded() then game.Loaded:Wait() end
+local players, deadline = game:GetService("Players"), os.clock() + 60
+while not players.LocalPlayer do task.wait() end
+while not players.LocalPlayer.Character and os.clock() < deadline do task.wait(0.25) end
+task.wait(8)
+loadstring(game:HttpGet(%q))()
+]]):format(self.ScriptUrl))
 	end
 	local function reconnect()
 		if not state.reconnect or state.reconnectAt or not self.Gui.Parent then return end

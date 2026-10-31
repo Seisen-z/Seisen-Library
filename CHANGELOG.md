@@ -1,6 +1,6 @@
 # 2026-11-01
 
-- Fixed the game erroring with "Requested module experienced an error while loading" right after a server hop.
+- Fixed the game erroring with "Requested module experienced an error while loading" after a server hop: Auto Execute On Teleport now waits for the game to load before running the script.
 - Fixed UI tween errors ("lacking capability Plugin") when the thread identity is too low.
 
 # 2026-10-29
