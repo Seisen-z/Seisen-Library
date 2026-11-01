@@ -6086,7 +6086,7 @@ function Lib:CloseAllDropdowns()
 end
 
 -- ------------------------------------------------------------ tooltip
-local TipGui, TipFrame, TipLabel, TipConnection
+local TipGui, TipFrame, TipLabel, TipConnection, TipScale
 function Lib:ShowTooltip(text)
 	local win = CurrentWindow()
 	if not win or type(text) ~= "string" or text == "" then
@@ -6097,9 +6097,16 @@ function Lib:ShowTooltip(text)
 		Round(TipFrame, 8)
 		Stroke(TipFrame, Theme.StrokeHover)
 		Pad(TipFrame, 10, 6, 10, 6)
-		TipLabel = Label({ Size = UDim2.fromOffset(0, 0), AutomaticSize = Enum.AutomaticSize.XY, TextSize = 12, FontFace = Fonts.Regular, TextWrapped = false, TextTruncate = Enum.TextTruncate.None, ZIndex = 81, Parent = TipFrame })
+		TipScale = New("UIScale", { Parent = TipFrame })
+		TipLabel = Label({ Size = UDim2.fromOffset(0, 0), AutomaticSize = Enum.AutomaticSize.XY, TextSize = 12, FontFace = Fonts.Regular, TextTruncate = Enum.TextTruncate.None, ZIndex = 81, Parent = TipFrame })
 	end
+	-- Phones scale the tooltip down like the window, and long tips wrap instead of running off the screen:
+	-- measure the one-line width first, then fix the width (capped) and let the height follow the wrapped text
+	TipScale.Scale = CompactFactor(win.Gui)
+	TipLabel.AutomaticSize, TipLabel.TextWrapped = Enum.AutomaticSize.XY, false
 	TipLabel.Text = text
+	TipLabel.Size = UDim2.fromOffset(math.min(TipLabel.TextBounds.X, math.clamp(win.Gui.AbsoluteSize.X / TipScale.Scale - 56, 120, 300)), 0)
+	TipLabel.AutomaticSize, TipLabel.TextWrapped = Enum.AutomaticSize.Y, true
 	TipFrame.Visible = true
 	if TipConnection then
 		TipConnection:Disconnect()
@@ -6113,7 +6120,7 @@ function Lib:ShowTooltip(text)
 		local size = TipFrame.AbsoluteSize
 		local x = math.clamp(m.X + 14, 6, math.max(screen.X - size.X - 6, 6))
 		local y = math.clamp(m.Y + 18, 6, math.max(screen.Y - size.Y - 6, 6))
-		TipFrame.Position = UDim2.fromOffset(x - win.Gui.AbsolutePosition.X, y - win.Gui.AbsolutePosition.Y)
+		TipFrame.Position = UDim2.fromOffset((x - win.Gui.AbsolutePosition.X) / TipScale.Scale, (y - win.Gui.AbsolutePosition.Y) / TipScale.Scale)
 	end)
 end
 

@@ -2,6 +2,8 @@
 
 - Fixed the game erroring with "Requested module experienced an error while loading" after a server hop: Auto Execute On Teleport now waits for the game to load before running the script.
 - Fixed UI tween errors ("lacking capability Plugin") when the thread identity is too low.
+- Fixed long tooltips running off the screen on one line: they now wrap.
+- Fixed tooltips not scaling down on phones like the rest of the window.
 
 # 2026-10-29
 
