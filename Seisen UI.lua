@@ -8113,6 +8113,51 @@ function Lib:CreateWidget(o)
 	return { Instance = gui, Destroy = function() gui:Destroy() end }
 end
 
+-- Floating, draggable panel with a scrolling rich-text body. While it is shown, o.Update() (returns the text) is called every o.Interval seconds
+function Lib:CreateLivePanel(o)
+	o = Opt(o)
+	local gui = New("ScreenGui", { Name = "SeisenLivePanel", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 1000019, Enabled = false })
+	ParentGui(gui)
+	local frame = New("Frame", { Position = UDim2.fromOffset(12, 80), Size = UDim2.fromOffset(o.Width or 320, o.Height or 460), BackgroundColor3 = Theme.Surface2, BackgroundTransparency = 0.1, BorderSizePixel = 0, Parent = gui })
+	Round(frame, 10)
+	Stroke(frame)
+	Pad(frame, 10, 8, 10, 8)
+	local head = Label({ Size = UDim2.new(1, 0, 0, 20), Text = o.Title or "Panel", TextSize = 13, FontFace = Fonts.Bold, Parent = frame })
+	local scroll = New("ScrollingFrame", { Position = UDim2.fromOffset(0, 26), Size = UDim2.new(1, 0, 1, -26), BackgroundTransparency = 1, BorderSizePixel = 0, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), ScrollBarThickness = 3, Parent = frame })
+	local body = Label({ Size = UDim2.new(1, -8, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, TextSize = 12, FontFace = Fonts.Regular, TextColor3 = Theme.Muted, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, TextYAlignment = Enum.TextYAlignment.Top, RichText = true, Parent = scroll })
+	local dragging, start, origin
+	head.InputBegan:Connect(function(input)
+		if IsPress(input) then
+			dragging, start, origin = true, MousePos(), Vector2.new(frame.Position.X.Offset, frame.Position.Y.Offset)
+		end
+	end)
+	local moved = UserInputService.InputChanged:Connect(function(input)
+		if dragging and IsMove(input) then
+			local p = origin + (MousePos() - start)
+			frame.Position = UDim2.fromOffset(p.X, p.Y)
+		end
+	end)
+	local released = UserInputService.InputEnded:Connect(function(input)
+		if IsPress(input) then
+			dragging = false
+		end
+	end)
+	gui.Destroying:Connect(function()
+		moved:Disconnect()
+		released:Disconnect()
+	end)
+	task.spawn(function()
+		while gui.Parent do
+			if gui.Enabled and o.Update then
+				local ok, text = pcall(o.Update)
+				body.Text = ok and tostring(text) or "Couldn't read: " .. tostring(text)
+			end
+			task.wait(o.Interval or 1)
+		end
+	end)
+	return { Instance = gui, SetVisible = function(_, v) gui.Enabled = v end, Destroy = function() gui:Destroy() end }
+end
+
 function Lib:EnsureStatsWidget()
 	if not self._statsWidget then
 		self._statsWidget = self:CreateWidget({ Title = "Performance", ShowFPS = true, ShowPing = true, ShowMemory = true, ShowInstances = false })
