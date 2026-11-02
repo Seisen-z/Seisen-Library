@@ -8147,9 +8147,12 @@ function Lib:CreateLivePanel(o)
 		released:Disconnect()
 	end)
 	task.spawn(function()
+		local identity = getthreadidentity and getthreadidentity()
 		while gui.Parent do
 			if gui.Enabled and o.Update then
 				local ok, text = pcall(o.Update)
+				-- Game code run by Update lowers the thread's identity, and a lowered one can't touch this executor-owned gui
+				if identity and setthreadidentity then pcall(setthreadidentity, identity) end
 				body.Text = ok and tostring(text) or "Couldn't read: " .. tostring(text)
 			end
 			task.wait(o.Interval or 1)
