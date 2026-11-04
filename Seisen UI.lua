@@ -5802,6 +5802,34 @@ function Lib:CreateWindow(o)
 	NewIcon(logo, self.LogoIcon, logoSize, Theme.Accent, UDim2.new(0.5, -logoSize / 2, 0.5, -logoSize / 2))
 	Label({ Position = UDim2.fromOffset(62, 15), Size = UDim2.new(1, -70, 0, 20), Text = self.Title, TextSize = 14, FontFace = Fonts.Bold, Parent = brand })
 	Label({ Position = UDim2.fromOffset(62, 35), Size = UDim2.new(1, -70, 0, 14), Text = self.Subtitle, TextSize = 10, FontFace = Fonts.Regular, TextColor3 = Theme.Muted, Parent = brand })
+	-- status pill under the subtitle: CreateWindow({ Status = "BETA", StatusColor = Color3 }) or Window:SetStatus(text, color)
+	local statusPill = New("TextLabel", {
+		Position = UDim2.fromOffset(62, 51),
+		Size = UDim2.fromOffset(0, 14),
+		AutomaticSize = Enum.AutomaticSize.X,
+		BackgroundColor3 = Theme.Surface3,
+		BorderSizePixel = 0,
+		Text = "",
+		TextSize = 9,
+		FontFace = Fonts.Bold,
+		TextTruncate = Enum.TextTruncate.None,
+		Visible = false,
+		Parent = brand,
+	})
+	Round(statusPill, 4)
+	Pad(statusPill, 14, 0, 6, 0)
+	local statusDot = New("Frame", { Position = UDim2.new(0, -9, 0.5, -2), Size = UDim2.fromOffset(4, 4), BorderSizePixel = 0, Parent = statusPill })
+	Round(statusDot, 2)
+	local statusStroke = Stroke(statusPill, Theme.Warning, 1, 0.6)
+	function self:SetStatus(text, color)
+		color = color or Theme.Warning
+		statusPill.Visible = text ~= nil and text ~= ""
+		statusPill.Text = text or ""
+		statusPill.TextColor3 = color
+		statusDot.BackgroundColor3 = color
+		statusStroke.Color = color
+	end
+	self:SetStatus(o.Status, o.StatusColor)
 
 	self.TabList = New("ScrollingFrame", {
 		Position = UDim2.fromOffset(8, 72),
