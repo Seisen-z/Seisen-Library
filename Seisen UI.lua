@@ -14,7 +14,11 @@ local LocalPlayer = Players.LocalPlayer
 local Lib = { Flags = {}, Windows = {} }
 -- Game functions can silently drop the calling thread's UI access while its identity still reads the same; reapplying the identity restores it
 function Lib._fixIdentity()
-	if getthreadidentity and setthreadidentity then pcall(setthreadidentity, getthreadidentity()) end
+	if getthreadidentity and setthreadidentity then
+		local identity = getthreadidentity()
+		pcall(setthreadidentity, 2)
+		pcall(setthreadidentity, identity)
+	end
 end
 
 local Theme = {
@@ -1063,6 +1067,7 @@ function Container:Label(o)
 	end
 	local handle = { Instance = lbl }
 	function handle:Set(t)
+		Lib._fixIdentity()
 		lbl.Text = t
 	end
 	function handle:Get()
