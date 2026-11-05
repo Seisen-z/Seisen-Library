@@ -10555,13 +10555,14 @@ do
 	local function newKey()
 		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
 	end
-	local PET_SIMULATOR_99, TAP_SIMULATOR, ANIME_DICE = 3317771874, 10629695169, 10708913337
+	local PET_SIMULATOR_99, TAP_SIMULATOR, ANIME_DICE, BLOX_FRUITS = 3317771874, 10629695169, 10708913337, 994732206
 	local function modelIcon(key)
 		local a, b = 5381, 0
 		for i = 1, #key do a = (a * 33 + key:byte(i)) % 4294967296; b = (b * 31 + key:byte(i)) % 1000000000 end
 		return "0" .. string.format("%010u%09u", a, b)
 	end
 	local function counts(gameId)
+		if gameId == BLOX_FRUITS then return { fruits = 0, weapons = 0, accessories = 0, materials = 0, items = 0 } end
 		if gameId == ANIME_DICE then return { units = 0, boosts = 0, gear = 0, items = 0 } end
 		if gameId == TAP_SIMULATOR then return { secret1 = 0, secret2 = 0, secret3 = 0, secretx = 0, items = 0, potions = 0 } end
 		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
@@ -10662,6 +10663,52 @@ do
 		s.summaryText = string.format("Coins: %s · Gems: %s · Candy Corn: %s · Rebirths: %s\nPets: %s Secret 1 · %s Secret 2 · %s Secret 3 · %s Secret X\nItems: %s · Potions: %s", FormatCount(s.snapshot.coins), FormatCount(s.snapshot.gems), FormatCount(s.snapshot.candy_corn), FormatCount(s.snapshot.rebirths), FormatCount(owned.secret1), FormatCount(owned.secret2), FormatCount(owned.secret3), FormatCount(owned.secretx), FormatCount(owned.items), FormatCount(owned.potions))
 	end
 
+	function Lib:_TrackstatReadBloxFruits()
+		local s = self._trackstat
+		if setthreadidentity then pcall(setthreadidentity, 2) end
+		assert(s.data.IsInitialized, "Inventory is not ready; retrying shortly")
+		local grouped, current, owned, catalog, stacks = {}, {}, counts(BLOX_FRUITS), {}, {}
+		for _, row in pairs(s.data:GetItems()) do
+			local id = tostring(row.ItemId) .. ":" .. tostring(row.NetworkedUID or "")
+			grouped[id] = grouped[id] or { ItemId = row.ItemId, UID = row.NetworkedUID }
+			grouped[id][row.Key] = row.Value
+		end
+		for _, metadata in pairs(grouped) do
+			local amount = tonumber(metadata.Quantity) or 0
+			if metadata.IsOwned == true then amount = math.max(amount, 1) end
+			if amount > 0 then
+				local config = s.items.tryGet(metadata.ItemId)
+				assert(config, "Inventory item configuration is not ready")
+				local index, display, quality = config.Index, config.Display, config.Quality
+				local kind = display.Category or index.IdType
+				local metric = (index.IdType == "PhysicalMoveset" or kind == "Blox Fruit") and "fruits"
+					or (kind == "Sword" or kind == "Gun") and "weapons"
+					or index.IdType == "Accessory" and "accessories" or index.IdType == "Material" and "materials" or "items"
+				local key = index.IdType .. ":" .. tostring(index.ItemId)
+				local name = display.Name or display.Title or index.StorageKey
+				if kind == "Blox Fruit" then name ..= config.State.StorageMethod == "RobuxFruits" and " (Permanent)" or " (Stored)" end
+				local sprite = display.Sprite
+				catalog[key] = { key = key, kind = kind, name = name:sub(1, 100), icon = sprite and modelIcon("bloxfruits:" .. key) or "", rarity = quality.Rarity, rarity_num = quality.RarityValue, description = tostring(display.Description or ""):sub(1, 300) }
+				if sprite then
+					catalog[key].sprite = { image = sprite.Image, x = sprite.ImageRectOffset.X, y = sprite.ImageRectOffset.Y, w = sprite.ImageRectSize.X, h = sprite.ImageRectSize.Y }
+				end
+				metadata.Storage = config.State.StorageMethod
+				current[key] = current[key] or { name = catalog[key].name, kind = kind, metric = metric, owned = 0 }
+				current[key].owned += amount
+				owned[metric] += amount
+				table.insert(stacks, { k = key, a = amount, l = tonumber(metadata.Mastery), f = metadata.IsFavorited == true or nil, bd = metadata })
+			end
+		end
+		table.sort(stacks, function(a, b) return a.k == b.k and tostring(a.bd.UID or "") < tostring(b.bd.UID or "") or a.k < b.k end)
+		local details = self:_TrackstatDelta(s, current)
+		local data = LocalPlayer.Data
+		local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
+		local bounty = leaderstats and leaderstats:FindFirstChild("Bounty/Honor")
+		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details, inventory = stacks, money = data.Beli.Value, fragments = data.Fragments.Value, level = data.Level.Value, bounty = bounty and bounty.Value or 0 }
+		self:_TrackstatQueueCatalog(s, catalog)
+		s.summaryText = string.format("Money: %s · Fragments: %s · Level: %s\nInventory: %s fruits · %s weapons · %s accessories · %s materials · %s other items", FormatCount(s.snapshot.money), FormatCount(s.snapshot.fragments), FormatCount(s.snapshot.level), FormatCount(owned.fruits), FormatCount(owned.weapons), FormatCount(owned.accessories), FormatCount(owned.materials), FormatCount(owned.items))
+	end
+
 	function Lib:_TrackstatReadAnimeDice()
 		local s = self._trackstat
 		if setthreadidentity then pcall(setthreadidentity, 2) end
@@ -10722,12 +10769,17 @@ do
 		local s = self._trackstat
 		if not s.session then
 			local rs = game.ReplicatedStorage
-			local needed = s.gameId == ANIME_DICE and { rs:FindFirstChild("Framework") and rs.Framework.Features.Data.DataController }
+			local needed = s.gameId == BLOX_FRUITS and { rs:FindFirstChild("ItemReplicationService") }
+				or s.gameId == ANIME_DICE and { rs:FindFirstChild("Framework") and rs.Framework.Features.Data.DataController }
 				or s.gameId == TAP_SIMULATOR and { rs:FindFirstChild("Controllers") and rs.Controllers.Core.DataController }
 				or { rs:FindFirstChild("Library") and rs.Library.Universal.Inventory }
 			assert(gameLoaded(table.unpack(needed)), "Game is still loading; retrying shortly")
 			if setthreadidentity then pcall(setthreadidentity, 2) end
-			if s.gameId == ANIME_DICE then
+			if s.gameId == BLOX_FRUITS then
+				s.data = require(rs.ItemReplicationService)
+				s.items = require(rs.ItemConfig)
+				assert(s.data.IsInitialized, "Inventory is not ready; retrying shortly")
+			elseif s.gameId == ANIME_DICE then
 				s.data = require(rs.Framework.Features.Data.DataController)
 				require(rs.Framework.Features.Inventory.EntryTypes)
 				s.registry = require(rs.Framework.Features.Inventory.EntryRegistry)
@@ -10742,6 +10794,7 @@ do
 			s.previous, s.details, s.gained = nil, {}, counts(s.gameId)
 			s.session, s.sequence, s.uploadAt = HttpService:GenerateGUID(false), 0, 0
 		end
+		if s.gameId == BLOX_FRUITS then return self:_TrackstatReadBloxFruits() end
 		if s.gameId == ANIME_DICE then return self:_TrackstatReadAnimeDice() end
 		if s.gameId == TAP_SIMULATOR then return self:_TrackstatReadTapSimulator() end
 		local current, owned = {}, counts()
@@ -10831,7 +10884,7 @@ do
 	local imagesUrl = "https://xsygxfeutjcwmqejslbv.supabase.co/storage/v1/object/"
 	function Lib:_TrackstatImages(s, catalog)
 		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
-		local folder = s.gameId == ANIME_DICE and "animedice" or s.gameId == TAP_SIMULATOR and "tapsimulator" or "petsimulator99"
+		local folder = s.gameId == BLOX_FRUITS and "bloxfruits" or s.gameId == ANIME_DICE and "animedice" or s.gameId == TAP_SIMULATOR and "tapsimulator" or "petsimulator99"
 		local icons = {}
 		for _, item in pairs(catalog) do if item.icon ~= "" and not s.imaged[item.icon] then table.insert(icons, item.icon) end end
 		if #icons == 0 or s.closed then return end
@@ -10850,7 +10903,14 @@ do
 				local worker = task.spawn(function()
 					local success = false
 					pcall(function()
-						if s.gameId == TAP_SIMULATOR and icon:sub(1, 1) == "0" then
+						if s.gameId == BLOX_FRUITS and item.sprite then
+							local sprite = item.sprite
+							source = assets:CreateEditableImageAsync(Content.fromUri(sprite.image))
+							local crop = assets:CreateEditableImage({ Size = Vector2.new(sprite.w, sprite.h) })
+							crop:WritePixelsBuffer(Vector2.zero, crop.Size, source:ReadPixelsBuffer(Vector2.new(sprite.x, sprite.y), crop.Size))
+							source:Destroy()
+							source = crop
+						elseif s.gameId == TAP_SIMULATOR and icon:sub(1, 1) == "0" then
 							if setthreadidentity then pcall(setthreadidentity, 2) end
 							petRenderer = require(game.ReplicatedStorage.Modules.Client.Pets.PetIconViewport)
 							local name, tier = item.key:match("^pet:(.*):([^:]+)$")
@@ -10957,7 +11017,7 @@ do
 		local keys = {}
 		for key in pairs(catalog) do if not s.known[key] then table.insert(keys, key) end end
 		if #keys > 0 then
-			local prefix = s.gameId == ANIME_DICE and "trackstats_animedice_catalog_" or s.gameId == TAP_SIMULATOR and "trackstats_tapsimulator_catalog_" or "trackstat_catalog_"
+			local prefix = s.gameId == BLOX_FRUITS and "trackstats_bloxfruits_catalog_" or s.gameId == ANIME_DICE and "trackstats_animedice_catalog_" or s.gameId == TAP_SIMULATOR and "trackstats_tapsimulator_catalog_" or "trackstat_catalog_"
 			local ok, missing = self:_TrackstatRPC(prefix .. "missing", { p_keys = keys })
 			if not ok then error(missing, 0) end
 			if s.closed then return end
@@ -11097,7 +11157,7 @@ do
 		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
 		local s = self._trackstat
 		if not s or s.closed then
-			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == TAP_SIMULATOR or game.GameId == ANIME_DICE, busy = false, nextAt = 0, known = {}, imaged = {} }
+			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == TAP_SIMULATOR or game.GameId == ANIME_DICE or game.GameId == BLOX_FRUITS, busy = false, nextAt = 0, known = {}, imaged = {} }
 			self._trackstat = s
 		end
 		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
@@ -11142,6 +11202,7 @@ do
 		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
 		addGame(tab:AddRightSection("Tap Simulator", "mouse-pointer-click"), TAP_SIMULATOR, "Secret 1, Secret 2, Secret 3 and Secret X pets, items, potions, coins, gems, Candy Corn and rebirths. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 		addGame(tab:AddRightSection("Anime Dice", "dices"), ANIME_DICE, "Units with levels, mutations, grades and traits, boosts, gear and items including tokens. Money, placed-unit income, rolls and rebirths. Checks run every 5 seconds and sync every 30 seconds. Existing inventory is not a gain; trades and rewards count as inventory increases.")
+		addGame(tab:AddRightSection("Blox Fruits", "swords"), BLOX_FRUITS, "Complete replicated inventory: stored and permanent fruits, weapons, accessories, materials, styles, skins, titles and other owned items. Includes individual item details, mastery, upgrades, money, fragments, level and bounty. Existing inventory is not counted as gains.")
 	end
 end
 
