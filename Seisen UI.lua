@@ -4376,10 +4376,12 @@ end
 function Window:_clamp(center)
 	local screen = self.Gui.AbsoluteSize
 	local half = self:_shownSize() / 2
-	return Vector2.new(
+	local clamped = Vector2.new(
 		math.clamp(center.X, half.X, math.max(screen.X - half.X, half.X)),
 		math.clamp(center.Y, half.Y, math.max(screen.Y - half.Y, half.Y))
 	)
+	-- Keep the window's top-left on whole pixels: a CanvasGroup drawn at a fractional position renders blurry (text and controls included).
+	return Vector2.new(math.floor(clamped.X - half.X + 0.5) + half.X, math.floor(clamped.Y - half.Y + 0.5) + half.Y)
 end
 
 function Window:_enableResize(minSize, maxSize)
@@ -7196,6 +7198,8 @@ function Window:_setBaseScale(scale)
 	local fit = math.min(viewport.X / (size.X.Offset + 32), viewport.Y / (size.Y.Offset + 32))
 	self.BaseScale = math.min(fit, math.clamp(math.min(1, fit) * CompactFactor(self.Gui) * self._requestedScale, 0.25, 2))
 	self.RootScale.Scale = self.BaseScale
+	-- a new scale changes the window's size around its centre, so put its corner back on a whole pixel
+	self:_followScreen()
 end
 
 function Window:SetScale(scale)
@@ -8624,23 +8628,37 @@ function Window:_buildServerHop(tab)
 	local status = section:AddLabel({ Text = "Pick a maximum player count, including you." })
 	local state = { max = 2, auto = false, busy = false, nextAt = 0, reconnect = true, reconnectAt = nil, checkAt = 0 }
 	local autoExecute, armed = true, false
-	local function queueScript()
+	local function queueScript(quiet)
 		if not autoExecute or armed or not self.Gui.Parent then return end
 		local queue = queue_on_teleport or queueonteleport
 		if type(queue) ~= "function" or type(self.ScriptUrl) ~= "string" or self.ScriptUrl == "" then
-			Lib:Notify({ Title = "Auto Execute", Content = type(queue) ~= "function" and "Teleport queue is unavailable in this executor." or "No script URL is available for this game.", Type = "warning" })
+			if not quiet then
+				Lib:Notify({ Title = "Auto Execute", Content = type(queue) ~= "function" and "Teleport queue is unavailable in this executor." or "No script URL is available for this game.", Type = "warning" })
+			end
 			return
 		end
+		-- Only the newest queued run goes ahead (a re-executed script queues again), and turning the toggle off cancels it.
+		local genv = getgenv and getgenv() or _G
+		local token = tostring(os.clock()) .. tostring(math.random(1, 1000000000))
+		genv.SeisenAutoExecuteToken = token
 		-- The queued code starts the moment the new server does. A script that requires game modules before the game has loaded
-		-- them leaves them broken for good ("Requested module experienced an error while loading"), so it waits for the game first
+		-- them leaves them broken for good ("Requested module experienced an error while loading"), so it waits for the game first.
+		-- Big games keep initialising for a while after that, so a failed start is retried a few times instead of giving up.
 		armed = pcall(queue, ([[
+local genv = getgenv and getgenv() or _G
+local stale = function(token) return (genv.SeisenAutoExecuteToken ~= nil and genv.SeisenAutoExecuteToken ~= token) or genv.SeisenAutoExecuteOff end
+if stale(%q) then return end
 if not game:IsLoaded() then game.Loaded:Wait() end
 local players, limit = game:GetService("Players"), os.clock() + 90
 while not players.LocalPlayer do task.wait() end
 while not players.LocalPlayer.Character and os.clock() < limit do task.wait(0.25) end
 task.wait(10)
-loadstring(game:HttpGet(%q))()
-]]):format(self.ScriptUrl))
+for _ = 1, 4 do
+  if stale(%q) then return end
+  if pcall(function() loadstring(game:HttpGet(%q))() end) then return end
+  task.wait(8)
+end
+]]):format(token, token, self.ScriptUrl))
 	end
 	local function reconnect()
 		if not state.reconnect or state.reconnectAt or not self.Gui.Parent then return end
@@ -8684,7 +8702,12 @@ loadstring(game:HttpGet(%q))()
 		end })
 	section:AddToggle({ Name = "Auto Execute On Teleport", Flag = "BuiltIn_AutoExecute", Default = true,
 		Tooltip = "Run this game's script again after teleporting. Requires your executor's teleport queue.",
-		Callback = function(value) autoExecute = value end })
+		Callback = function(value)
+			autoExecute = value
+			local genv = getgenv and getgenv() or _G
+			genv.SeisenAutoExecuteOff = not value
+			if value then queueScript(true) end
+		end })
 	local bottingOverlay
 	section:AddToggle({ Name = "Botting Mode", Flag = "BuiltIn_BottingMode", Default = false,
 		Tooltip = "Turns off 3D rendering and covers the screen in black. Everything keeps running, your GPU does not.",
@@ -8741,6 +8764,9 @@ loadstring(game:HttpGet(%q))()
 	self:_listen(LocalPlayer.OnTeleport, function(teleportState)
 		if teleportState == Enum.TeleportState.Started or teleportState == Enum.TeleportState.InProgress then queueScript() end
 	end)
+	-- Queue as soon as the window exists instead of waiting for OnTeleport, which some games' server-side teleports fire too late or never.
+	-- The queue only runs on the next teleport, so queuing early costs nothing.
+	task.defer(queueScript, true)
 end
 
 function Library:_BuildConfigTab(window)
