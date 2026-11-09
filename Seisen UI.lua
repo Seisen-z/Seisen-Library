@@ -10414,11 +10414,8 @@ function Library:_BuildSuggestionsTab(window)
     local suggestTab     = window:AddTab("Suggestions", "message-square", true)
     local suggestSection = suggestTab:AddLeftSection("Send a Suggestion", "send")
 
-    local WEBHOOKS = {
-        ["Suggestion"] = "https://ptb.discord.com/api/webhooks/1521484910177812520/wMF5tuZVGvtDcSE20sINPfbTUlzd0sPXcSDWq4GaGdP8HLMNEZhRl6QEYwft5ZRQHxDr",
-        ["Bug Report"] = "https://ptb.discord.com/api/webhooks/1521488104735641763/PMruMCYdfEiOh8rlep_4U6TNbYuhR9-uOczrpLOFR9UUYnTHgLyKqiCaoXD83T0_s0k6",
-        ["Vouch"]      = "https://ptb.discord.com/api/webhooks/1521488793536827603/gN1N6tMPmdFND71tpIzI0jDjxMa1Y1_8zwviLl5KCi-4j6ptPZ2e99o9IAFyJvVcpR8_",
-    }
+    -- The bot relays to Discord, so no webhook or token ships in this file.
+    local FEEDBACK_URL = "https://seisenbot.wisp.uno/api/feedback"
     local suggestCategory = "Vouch"
     local suggestText     = ""
     local suggestError    = ""
@@ -10475,64 +10472,20 @@ function Library:_BuildSuggestionsTab(window)
                 })
                 return
             end
-            local webhook = WEBHOOKS[suggestCategory]
-            if not webhook then return end
-            local ok = pcall(function()
-                local HS = game:GetService("HttpService")
-                -- Anonymous by design: no username, userId, or avatar is ever read or sent,
-                -- so submissions can't be traced back to a specific player.
-                local isoTime = os.date("!%Y-%m-%dT%H:%M:%SZ")
-                local body
-                if suggestCategory == "Vouch" then
-                    -- Vouch uses a regular text channel (no thread_name)
-                    body = HS:JSONEncode({
-                        username = "Seisen Hub",
-                        embeds = {{
-                            title       = "New vouch for Seisen Hub created!",
-                            description = "⭐⭐⭐⭐⭐",
-                            color       = 3447003,
-                            fields      = {
-                                { name = "Vouch:",      value = suggestText, inline = false },
-                                { name = "Vouched by:", value = "Anonymous", inline = true  },
-                            },
-                            timestamp = isoTime,
-                            footer    = { text = "Seisen Hub Script" },
-                        }},
-                    })
-                elseif suggestCategory == "Bug Report" then
-                    body = HS:JSONEncode({
-                        thread_name = "[Bug Report] " .. isoTime,
-                        username    = "Seisen Hub",
-                        embeds = {{
-                            title       = "Bug Report",
-                            description = suggestText,
-                            color       = 16711684,
-                            image       = { url = suggestError },
-                            footer      = { text = "Submitted anonymously" },
-                        }},
-                    })
-                else
-                    body = HS:JSONEncode({
-                        thread_name = "[Suggestion] " .. isoTime,
-                        username    = "Seisen Hub",
-                        embeds = {{
-                            title       = "Suggestion",
-                            description = suggestText,
-                            color       = 16711684,
-                            footer      = { text = "Submitted anonymously" },
-                        }},
-                    })
-                end
-                local fn = request or (syn and syn.request) or (http and http.request)
-                if fn then
-                    fn({
-                        Url     = webhook,
-                        Method  = "POST",
-                        Headers = { ["Content-Type"] = "application/json" },
-                        Body    = body,
-                    })
-                end
-            end)
+            local send = request or http_request or (syn and syn.request) or (http and http.request)
+            -- Anonymous by design: only the category, text and screenshot URL are sent.
+            local ok, res = pcall(send, {
+                Url     = FEEDBACK_URL,
+                Method  = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body    = game:GetService("HttpService"):JSONEncode({
+                    category  = suggestCategory,
+                    message   = suggestText,
+                    image_url = suggestCategory == "Bug Report" and suggestError or nil,
+                }),
+            })
+            local code = ok and type(res) == "table" and res.StatusCode or 0
+            ok = code >= 200 and code < 300
             if ok then
                 self:Notify({
                     Title = "Suggestions", Content = "Sent! Thank you.",
@@ -10548,7 +10501,7 @@ function Library:_BuildSuggestionsTab(window)
                 suggestError = ""
             else
                 self:Notify({
-                    Title = "Suggestions", Content = "Failed to send. Check your executor's HTTP permissions.",
+                    Title = "Suggestions", Content = (code == 429 and "Too many messages - try again in a minute." or "Failed to send. Check your executor's HTTP permissions."),
                     Duration = 5, Type = "error",
                 })
             end
