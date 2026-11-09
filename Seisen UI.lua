@@ -6265,6 +6265,10 @@ function Lib:Toggle()
 end
 
 function Lib:Unload()
+	if self._builtInCleanups then
+		for _, fn in ipairs(self._builtInCleanups) do pcall(fn) end
+		self._builtInCleanups = {}
+	end
 	if self._unloadFn then
 		local fn = self._unloadFn
 		self._unloadFn = nil
@@ -9791,331 +9795,170 @@ function Library:_BuildESPTab(window)
     local espLeft  = espTab:AddLeftSection("Players", "users")
     local espRight = espTab:AddRightSection("Options", "sliders-horizontal")
 
-    local espLib             = nil
-    local playerESPs         = {}
-    local espEnabled         = false
-    local espHighlight       = true
-    local espNameTag         = true
-    local espDistance        = true
-    local espTracers         = false
-    local espArrow           = false
-    local espBox2D           = false
-    local espBox3D           = false
-    local espSkeleton        = false
-    local espTeamColor       = false
-    local espRainbow         = false
-    local espColor           = Color3.fromRGB(255, 80, 80)
-    local espMaxDist         = 5000
-    local espPlayerAddConn   = nil
-    local espPlayerRemConn   = nil
-    local espCharConns       = {}
+    local espEnabled  = false
+    local espBoxes    = true
+    local espTracers  = true
+    local espInfo     = true
+    local espTeamCheck = false
+    local espMaxDist  = 5000
+    local espBoxScale = 1.5
+    local espColor    = Color3.fromRGB(0, 255, 100)
 
-    local function getESP()
-        if espLib and not espLib.Destroyed then return espLib end
-        local g = (getgenv and getgenv()) or shared
-        if g.mstudio45_ESP and not g.mstudio45_ESP.Destroyed then
-            espLib = g.mstudio45_ESP
-            return espLib
-        end
-        if self.ESPUrl then
-            pcall(function()
-                loadstring(game:HttpGet(self.ESPUrl, true))()
-            end)
-            local g2 = (getgenv and getgenv()) or shared
-            if g2.mstudio45_ESP and not g2.mstudio45_ESP.Destroyed then
-                espLib = g2.mstudio45_ESP
-                return espLib
-            end
-        end
-        return nil
+    local drawTable   = {}  -- [player] = { Box, Tracer, Info }
+    local espConn     = nil
+    local remConn     = nil
+
+    local function getOrCreate(player)
+        if drawTable[player] then return drawTable[player] end
+        local box    = Drawing.new("Square")
+        box.Thickness = 1; box.Filled = false; box.Visible = false
+        local tracer = Drawing.new("Line")
+        tracer.Thickness = 1; tracer.Visible = false
+        local info   = Drawing.new("Text")
+        info.Size = 13; info.Center = true; info.Outline = true; info.Font = 2; info.Visible = false
+        drawTable[player] = { Box = box, Tracer = tracer, Info = info }
+        return drawTable[player]
     end
 
-    local function playerColor(player)
-        if espTeamColor and player.Team then
-            return player.Team.TeamColor.Color
-        end
-        return espColor
-    end
-
-    local function addESP(player)
-        if player == LocalPlayer then return end
-        if playerESPs[player] then return end
-        local lib = getESP()
-        if not lib then return end
-        local char = player.Character
-        if not char then return end
-        local col = playerColor(player)
-        local ok, inst = pcall(function()
-            return lib:Add({
-                Name               = player.Name,
-                Model              = char,
-                ESPType            = "Highlight",
-                MaxDistance        = espMaxDist,
-                Color              = col,
-                FillColor          = col,
-                OutlineColor       = col,
-                FillTransparency   = 0.6,
-                OutlineTransparency = 0,
-                Visible            = espHighlight,
-                Tracer = {
-                    Enabled      = espTracers,
-                    Color        = col,
-                    Thickness    = 1,
-                    Transparency = 0,
-                    From         = "Bottom"
-                },
-                Arrow = {
-                    Enabled      = espArrow,
-                    Color        = col,
-                    CenterOffset = 300,
-                },
-                Box2D = {
-                    Enabled      = espBox2D,
-                    Color        = col,
-                    Thickness    = 1,
-                    Transparency = 0,
-                    Filled       = false,
-                },
-                Box3D = {
-                    Enabled      = espBox3D,
-                    Color        = col,
-                    Thickness    = 1,
-                    Transparency = 0,
-                },
-                Skeleton = {
-                    Enabled      = espSkeleton,
-                    Color        = col,
-                    Thickness    = 1,
-                    Transparency = 0,
-                },
-            })
-        end)
-        if ok and inst then
-            playerESPs[player] = inst
+    local function removePlayer(player)
+        local d = drawTable[player]
+        if d then
+            pcall(function() d.Box:Remove() end)
+            pcall(function() d.Tracer:Remove() end)
+            pcall(function() d.Info:Remove() end)
+            drawTable[player] = nil
         end
     end
 
-    local function removeESP(player)
-        local inst = playerESPs[player]
-        if inst then
-            pcall(function() inst:Destroy() end)
-            playerESPs[player] = nil
-        end
+    local function clearAll()
+        for p in pairs(drawTable) do removePlayer(p) end
     end
 
-    local function clearESPs()
-        for p, _ in pairs(playerESPs) do
-            removeESP(p)
-        end
+    local function getAimPart(char)
+        return char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
     end
 
-    local function enableESP()
-        local lib = getESP()
-        if not lib then
-            self:Notify({ Title = "ESP", Content = "ESP library not found.\nSet Library.ESPUrl or load ESP.lua before enabling.", Duration = 6, Type = "error" })
-            if self.Toggles and self.Toggles["BuiltIn_PlayerESP"] then
-                self.Toggles["BuiltIn_PlayerESP"]:SetValue(false)
-            end
-            return
-        end
-        lib.GlobalConfig.Billboards = espNameTag
-        lib.GlobalConfig.Distance   = espDistance
-        lib.GlobalConfig.Tracers    = espTracers
-        lib.GlobalConfig.Arrows     = espArrow
-        lib.GlobalConfig.Boxes2D    = espBox2D
-        lib.GlobalConfig.Boxes3D    = espBox3D
-        lib.GlobalConfig.Skeleton   = espSkeleton
-        lib.GlobalConfig.Rainbow    = espRainbow
-        for _, p in ipairs(Players:GetPlayers()) do
-            task.spawn(addESP, p)
-        end
-        espPlayerAddConn = Players.PlayerAdded:Connect(function(p)
+    local function isAlive(char)
+        local h = char and char:FindFirstChildOfClass("Humanoid")
+        return h and h.Health > 0
+    end
+
+    local function getHp(char)
+        local h = char and char:FindFirstChildOfClass("Humanoid")
+        if h then return math.floor(h.Health), math.floor(h.MaxHealth) end
+        return 0, 100
+    end
+
+    local function startESP()
+        if espConn then return end
+        espConn = RunService.RenderStepped:Connect(function()
             if not espEnabled then return end
-            local charConn
-            charConn = p.CharacterAdded:Connect(function()
-                if not espEnabled then
-                    charConn:Disconnect()
-                    return
-                end
-                removeESP(p)
-                task.wait(0.5)
-                addESP(p)
-            end)
-            espCharConns[p] = charConn
-            task.spawn(addESP, p)
-        end)
-        espPlayerRemConn = Players.PlayerRemoving:Connect(function(p)
-            removeESP(p)
-            if espCharConns[p] then
-                pcall(function() espCharConns[p]:Disconnect() end)
-                espCharConns[p] = nil
-            end
-        end)
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= LocalPlayer and not espCharConns[p] then
-                local charConn
-                charConn = p.CharacterAdded:Connect(function()
-                    if not espEnabled then
-                        charConn:Disconnect()
-                        return
+            local cam = workspace.CurrentCamera
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LocalPlayer then
+                    if espTeamCheck and p.Team == LocalPlayer.Team then
+                        local d = drawTable[p]
+                        if d then d.Box.Visible = false; d.Tracer.Visible = false; d.Info.Visible = false end
+                    else
+                        local d    = getOrCreate(p)
+                        local char = p.Character
+                        local part = char and getAimPart(char)
+                        d.Box.Visible    = false
+                        d.Tracer.Visible = false
+                        d.Info.Visible   = false
+                        if part and isAlive(char) then
+                            local dist = (part.Position - cam.CFrame.Position).Magnitude
+                            if dist <= espMaxDist then
+                                local pos, onScreen = cam:WorldToViewportPoint(part.Position)
+                                if onScreen then
+                                    local sp     = Vector2.new(pos.X, pos.Y)
+                                    local hp, mx = getHp(char)
+                                    local col    = espTeamCheck and (p.Team and p.Team.TeamColor.Color or espColor) or espColor
+                                    if espTracers then
+                                        d.Tracer.From         = Vector2.new(cam.ViewportSize.X / 2, cam.ViewportSize.Y)
+                                        d.Tracer.To           = sp
+                                        d.Tracer.Color        = col
+                                        d.Tracer.Transparency = 0.4
+                                        d.Tracer.Visible      = true
+                                    end
+                                    if espBoxes then
+                                        local scale    = math.clamp(1500 / pos.Z, 40, 200) * espBoxScale
+                                        d.Box.Size     = Vector2.new(scale * 0.65, scale)
+                                        d.Box.Position = sp - d.Box.Size / 2
+                                        d.Box.Color    = col
+                                        d.Box.Visible  = true
+                                    end
+                                    if espInfo then
+                                        d.Info.Position = sp - Vector2.new(0, math.clamp(1500 / pos.Z, 40, 200) * espBoxScale / 2 + 14)
+                                        d.Info.Text     = p.Name .. "  " .. hp .. "/" .. mx .. "  " .. math.floor(dist) .. "studs"
+                                        d.Info.Color    = Color3.fromRGB(255, 255, 255)
+                                        d.Info.Visible  = true
+                                    end
+                                end
+                            end
+                        end
                     end
-                    removeESP(p)
-                    task.wait(0.5)
-                    addESP(p)
-                end)
-                espCharConns[p] = charConn
+                end
             end
-        end
+        end)
+        remConn = Players.PlayerRemoving:Connect(removePlayer)
     end
 
-    local function disableESP()
-        if espPlayerAddConn then espPlayerAddConn:Disconnect(); espPlayerAddConn = nil end
-        if espPlayerRemConn then espPlayerRemConn:Disconnect(); espPlayerRemConn = nil end
-        for _, conn in pairs(espCharConns) do
-            pcall(function() conn:Disconnect() end)
-        end
-        espCharConns = {}
-        clearESPs()
+    local function stopESP()
+        if espConn then espConn:Disconnect(); espConn = nil end
+        if remConn then remConn:Disconnect(); remConn = nil end
+        clearAll()
     end
 
     -- ── Controls ─────────────────────────────────────────────────
     espLeft:AddToggle({
-        Name    = "Player ESP",
-        Default = false,
-        Flag    = "BuiltIn_PlayerESP",
-        Tooltip = "Highlight all players in the server",
+        Name     = "Player ESP",
+        Default  = false,
+        Flag     = "BuiltIn_PlayerESP",
+        Tooltip  = "Show boxes, tracers and labels for all players.",
         Callback = function(v)
             espEnabled = v
-            if v then enableESP() else disableESP() end
-        end
+            if v then startESP() else stopESP() end
+        end,
     })
 
     espLeft:AddToggle({
-        Name    = "Highlight",
-        Default = true,
-        Flag    = "BuiltIn_ESPHighlight",
-        Tooltip = "Show chams/highlight on players",
-        Callback = function(v)
-            espHighlight = v
-            for _, inst in pairs(playerESPs) do
-                pcall(function()
-                    if v then inst:Show() else inst:Hide() end
-                end)
-            end
-        end
+        Name     = "Boxes",
+        Default  = true,
+        Flag     = "BuiltIn_ESPBoxes",
+        Tooltip  = "Draw bounding boxes around players.",
+        Callback = function(v) espBoxes = v end,
     })
 
     espLeft:AddToggle({
-        Name    = "Name Tag",
-        Default = true,
-        Flag    = "BuiltIn_ESPNameTag",
-        Tooltip = "Show player name above their head",
-        Callback = function(v)
-            espNameTag = v
-            if espLib then espLib.GlobalConfig.Billboards = v end
-        end
+        Name     = "Tracers",
+        Default  = true,
+        Flag     = "BuiltIn_ESPTracers",
+        Tooltip  = "Draw lines from the bottom of the screen to each player.",
+        Callback = function(v) espTracers = v end,
     })
 
     espLeft:AddToggle({
-        Name    = "Show Distance",
-        Default = true,
-        Flag    = "BuiltIn_ESPDistance",
-        Tooltip = "Show stud distance in name tag",
-        Callback = function(v)
-            espDistance = v
-            if espLib then espLib.GlobalConfig.Distance = v end
-        end
+        Name     = "Info Labels",
+        Default  = true,
+        Flag     = "BuiltIn_ESPInfo",
+        Tooltip  = "Show name, HP and distance above each player.",
+        Callback = function(v) espInfo = v end,
     })
 
     espLeft:AddToggle({
-        Name    = "Tracers",
-        Default = false,
-        Flag    = "BuiltIn_ESPTracers",
-        Tooltip = "Draw a line from the screen to each player",
-        Callback = function(v)
-            espTracers = v
-            if espLib then espLib.GlobalConfig.Tracers = v end
-        end
+        Name     = "Team Check",
+        Default  = false,
+        Flag     = "BuiltIn_ESPTeamCheck",
+        Tooltip  = "Skip teammates.",
+        Callback = function(v) espTeamCheck = v end,
     })
 
-    espLeft:AddToggle({
-        Name    = "Arrow",
-        Default = false,
-        Flag    = "BuiltIn_ESPArrow",
-        Tooltip = "Show off-screen indicator arrow pointing to players",
-        Callback = function(v)
-            espArrow = v
-            if espLib then espLib.GlobalConfig.Arrows = v end
-        end
-    })
-
-    espLeft:AddToggle({
-        Name    = "Box 2D",
-        Default = false,
-        Flag    = "BuiltIn_ESPBox2D",
-        Tooltip = "Draw a 2D screen-space bounding box around players",
-        Callback = function(v)
-            espBox2D = v
-            if espLib then espLib.GlobalConfig.Boxes2D = v end
-        end
-    })
-
-    espLeft:AddToggle({
-        Name    = "Box 3D",
-        Default = false,
-        Flag    = "BuiltIn_ESPBox3D",
-        Tooltip = "Draw a 3D wireframe box around players in world space",
-        Callback = function(v)
-            espBox3D = v
-            if espLib then espLib.GlobalConfig.Boxes3D = v end
-        end
-    })
-
-    espLeft:AddToggle({
-        Name    = "Skeleton",
-        Default = false,
-        Flag    = "BuiltIn_ESPSkeleton",
-        Tooltip = "Show bone skeleton lines on players",
-        Callback = function(v)
-            espSkeleton = v
-            if espLib then espLib.GlobalConfig.Skeleton = v end
-        end
-    })
-
-    espLeft:AddToggle({
-        Name    = "Team Color",
-        Default = false,
-        Flag    = "BuiltIn_ESPTeamColor",
-        Tooltip = "Use team colors instead of custom color",
-        Callback = function(v)
-            espTeamColor = v
-        end
-    })
-
-    espLeft:AddToggle({
-        Name    = "Rainbow",
-        Default = false,
-        Flag    = "BuiltIn_ESPRainbow",
-        Tooltip = "Cycle ESP color through rainbow",
-        Callback = function(v)
-            espRainbow = v
-            if espLib then espLib.GlobalConfig.Rainbow = v end
-        end
-    })
-
-    -- ── Right options ─────────────────────────────────────────────
     espRight:AddColorPicker({
-        Name    = "ESP Color",
-        Default = Color3.fromRGB(255, 80, 80),
-        Flag    = "BuiltIn_ESPColor",
-        Callback = function(v)
-            espColor = v
-            if not espTeamColor then
-                for _, inst in pairs(playerESPs) do
-                    pcall(function() inst:SetEveryColor(v, true) end)
-                end
-            end
-        end
+        Name     = "ESP Color",
+        Default  = Color3.fromRGB(0, 255, 100),
+        Flag     = "BuiltIn_ESPColor",
+        Callback = function(v) espColor = v end,
     })
 
     espRight:AddSlider({
@@ -10125,32 +9968,295 @@ function Library:_BuildESPTab(window)
         Default   = 5000,
         Increment = 100,
         Flag      = "BuiltIn_ESPMaxDist",
-        Tooltip   = "How far away players are visible",
-        Callback  = function(v)
-            espMaxDist = v
-            for _, inst in pairs(playerESPs) do
-                pcall(function() inst.CurrentSettings.MaxDistance = v end)
-            end
-        end
+        Tooltip   = "Only show ESP within this range (studs).",
+        Callback  = function(v) espMaxDist = v end,
     })
 
     espRight:AddSlider({
-        Name      = "Fill Transparency",
-        Min       = 0,
-        Max       = 100,
-        Default   = 60,
-        Increment = 5,
-        Flag      = "BuiltIn_ESPFillAlpha",
-        Tooltip   = "Highlight fill transparency (0 = solid, 100 = invisible)",
-        Callback  = function(v)
-            local alpha = v / 100
-            for _, inst in pairs(playerESPs) do
-                pcall(function() inst.CurrentSettings.FillTransparency = alpha end)
-            end
-        end
+        Name      = "Box Scale",
+        Min       = 5,
+        Max       = 30,
+        Default   = 15,
+        Increment = 1,
+        Flag      = "BuiltIn_ESPBoxScale",
+        Tooltip   = "Size multiplier for ESP boxes.",
+        Callback  = function(v) espBoxScale = v / 10 end,
     })
 
+    self._builtInCleanups = self._builtInCleanups or {}
+    table.insert(self._builtInCleanups, stopESP)
+
     return espTab
+end
+
+function Library:_BuildAimbotTab(window)
+    self:_EnsureBuiltInSection(window)
+    local aimTab   = window:AddTab("Aimbot", "crosshair", true)
+    local aimLeft  = aimTab:AddLeftSection("Aimbot", "target")
+    local aimRight = aimTab:AddRightSection("Settings", "sliders-horizontal")
+
+    local aimEnabled  = false
+    local holdingAim  = false
+    local curTarget   = nil
+    local aimFOV      = 150
+    local aimSmooth   = 0.5
+    local aimYOffset  = 1.5
+    local aimVisCheck = false
+    local aimTeamCheck = false
+    local aimKeyBinding = Enum.UserInputType.MouseButton2
+
+    local aimKeyOptions = {
+        "Right Mouse", "Left Mouse", "Middle Mouse", "Left Shift", "Left Alt",
+        "Left Control", "E", "Q", "F", "C", "V", "X", "Z", "T",
+    }
+    local aimKeyMap = {
+        ["Right Mouse"]  = Enum.UserInputType.MouseButton2,
+        ["Left Mouse"]   = Enum.UserInputType.MouseButton1,
+        ["Middle Mouse"] = Enum.UserInputType.MouseButton3,
+        ["Left Shift"]   = Enum.KeyCode.LeftShift,
+        ["Left Alt"]     = Enum.KeyCode.LeftAlt,
+        ["Left Control"] = Enum.KeyCode.LeftControl,
+        ["E"] = Enum.KeyCode.E,  ["Q"] = Enum.KeyCode.Q,  ["F"] = Enum.KeyCode.F,
+        ["C"] = Enum.KeyCode.C,  ["V"] = Enum.KeyCode.V,  ["X"] = Enum.KeyCode.X,
+        ["Z"] = Enum.KeyCode.Z,  ["T"] = Enum.KeyCode.T,
+    }
+
+    local fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 1; fovCircle.NumSides = 64; fovCircle.Filled = false
+    fovCircle.ZIndex = 1; fovCircle.Color = Color3.fromRGB(255, 255, 255); fovCircle.Visible = false
+
+    local targetCircle = Drawing.new("Circle")
+    targetCircle.Thickness = 2.5; targetCircle.NumSides = 32; targetCircle.Filled = false
+    targetCircle.ZIndex = 5; targetCircle.Color = Color3.fromRGB(255, 50, 50); targetCircle.Visible = false
+
+    local showFOV = true
+
+    local function getAimPart(char)
+        return char and (char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart)
+    end
+
+    local function isAlive(char)
+        local h = char and char:FindFirstChildOfClass("Humanoid")
+        return h and h.Health > 0
+    end
+
+    local function getAimPos(part)
+        return part.Position + Vector3.new(0, aimYOffset, 0)
+    end
+
+    local function checkVisible(char, worldPos)
+        if not aimVisCheck then return true end
+        local cam    = workspace.CurrentCamera
+        local origin = cam.CFrame.Position
+        local params = RaycastParams.new()
+        params.FilterDescendantsInstances = { LocalPlayer.Character, cam }
+        params.FilterType = Enum.RaycastFilterType.Blacklist
+        local result = workspace:Raycast(origin, worldPos - origin, params)
+        return not result or (result.Instance and result.Instance:IsDescendantOf(char))
+    end
+
+    local inputConn  = nil
+    local releaseConn = nil
+    local renderConn = nil
+
+    local function startAimbot()
+        if renderConn then return end
+
+        inputConn = UserInputService.InputBegan:Connect(function(input, gp)
+            if gp then return end
+            if input.UserInputType == aimKeyBinding or input.KeyCode == aimKeyBinding then
+                holdingAim = true
+            end
+        end)
+
+        releaseConn = UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == aimKeyBinding or input.KeyCode == aimKeyBinding then
+                holdingAim = false
+                curTarget  = nil
+            end
+        end)
+
+        renderConn = RunService.RenderStepped:Connect(function()
+            if not aimEnabled then return end
+            local cam = workspace.CurrentCamera
+
+            if showFOV then
+                fovCircle.Position = cam.ViewportSize / 2
+                fovCircle.Radius   = aimFOV
+                fovCircle.Visible  = true
+            else
+                fovCircle.Visible = false
+            end
+
+            if not holdingAim then
+                curTarget = nil
+                targetCircle.Visible = false
+                return
+            end
+
+            -- validate current target
+            local valid = false
+            if curTarget then
+                local char = curTarget.Player.Character
+                local part = char and getAimPart(char)
+                if part and isAlive(char) then
+                    local aimPos        = getAimPos(part)
+                    local pos, onScreen = cam:WorldToViewportPoint(aimPos)
+                    if onScreen then
+                        local sd = (Vector2.new(pos.X, pos.Y) - cam.ViewportSize / 2).Magnitude
+                        if sd <= aimFOV and checkVisible(char, aimPos) then
+                            valid          = true
+                            curTarget.Part = part
+                            curTarget.Pos  = pos
+                        end
+                    end
+                end
+            end
+
+            if not valid then
+                local center = cam.ViewportSize / 2
+                local best, bestDist = nil, math.huge
+                for _, p in ipairs(Players:GetPlayers()) do
+                    if p ~= LocalPlayer then
+                        if not aimTeamCheck or p.Team ~= LocalPlayer.Team then
+                            local char = p.Character
+                            local part = char and getAimPart(char)
+                            if part and isAlive(char) then
+                                local aimPos        = getAimPos(part)
+                                local pos, onScreen = cam:WorldToViewportPoint(aimPos)
+                                if onScreen then
+                                    local sd = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                                    if sd <= aimFOV and checkVisible(char, aimPos) then
+                                        local d3 = (part.Position - cam.CFrame.Position).Magnitude
+                                        if d3 < bestDist then
+                                            bestDist = d3
+                                            best = { Player = p, Part = part, Pos = pos }
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+                curTarget = best
+            end
+
+            if curTarget then
+                local aimPos   = getAimPos(curTarget.Part)
+                local targetCF = CFrame.new(cam.CFrame.Position, aimPos)
+                cam.CFrame     = cam.CFrame:Lerp(targetCF, aimSmooth)
+                local pos, onScreen = cam:WorldToViewportPoint(aimPos)
+                if onScreen then
+                    targetCircle.Position = Vector2.new(pos.X, pos.Y)
+                    targetCircle.Radius   = math.clamp(500 / pos.Z, 5, 30)
+                    targetCircle.Visible  = true
+                else
+                    targetCircle.Visible = false
+                end
+            else
+                targetCircle.Visible = false
+            end
+        end)
+    end
+
+    local function stopAimbot()
+        holdingAim = false
+        curTarget  = nil
+        if inputConn   then inputConn:Disconnect();   inputConn   = nil end
+        if releaseConn then releaseConn:Disconnect(); releaseConn = nil end
+        if renderConn  then renderConn:Disconnect();  renderConn  = nil end
+        fovCircle.Visible    = false
+        targetCircle.Visible = false
+    end
+
+    -- ── Controls ─────────────────────────────────────────────────
+    aimLeft:AddToggle({
+        Name     = "Aimbot",
+        Default  = false,
+        Flag     = "BuiltIn_AimEnabled",
+        Tooltip  = "Lock camera onto the nearest enemy while holding the aim key.",
+        Callback = function(v)
+            aimEnabled = v
+            if v then startAimbot() else stopAimbot() end
+        end,
+    })
+
+    aimLeft:AddDropdown({
+        Name     = "Aim Key",
+        Default  = "Right Mouse",
+        Flag     = "BuiltIn_AimKey",
+        Options  = aimKeyOptions,
+        Tooltip  = "Button held to activate aimbot.",
+        Callback = function(v)
+            aimKeyBinding = aimKeyMap[v] or Enum.UserInputType.MouseButton2
+        end,
+    })
+
+    aimLeft:AddToggle({
+        Name     = "FOV Circle",
+        Default  = true,
+        Flag     = "BuiltIn_AimShowFOV",
+        Tooltip  = "Draw the aimbot FOV circle on screen.",
+        Callback = function(v) showFOV = v end,
+    })
+
+    aimLeft:AddToggle({
+        Name     = "Visibility Check",
+        Default  = false,
+        Flag     = "BuiltIn_AimVisCheck",
+        Tooltip  = "Only aim at targets not blocked by walls.",
+        Callback = function(v) aimVisCheck = v end,
+    })
+
+    aimLeft:AddToggle({
+        Name     = "Team Check",
+        Default  = false,
+        Flag     = "BuiltIn_AimTeamCheck",
+        Tooltip  = "Skip teammates when picking a target.",
+        Callback = function(v) aimTeamCheck = v end,
+    })
+
+    aimRight:AddSlider({
+        Name      = "FOV Radius",
+        Min       = 10,
+        Max       = 800,
+        Default   = 150,
+        Increment = 5,
+        Flag      = "BuiltIn_AimFOV",
+        Tooltip   = "Screen radius (px) the aimbot scans for targets.",
+        Callback  = function(v) aimFOV = v end,
+    })
+
+    aimRight:AddSlider({
+        Name      = "Smoothness",
+        Min       = 1,
+        Max       = 100,
+        Default   = 50,
+        Increment = 1,
+        Flag      = "BuiltIn_AimSmooth",
+        Tooltip   = "1 = instant snap, 100 = very smooth tracking.",
+        Callback  = function(v) aimSmooth = v / 100 end,
+    })
+
+    aimRight:AddSlider({
+        Name      = "Y Offset",
+        Min       = 0,
+        Max       = 50,
+        Default   = 15,
+        Increment = 1,
+        Flag      = "BuiltIn_AimYOffset",
+        Tooltip   = "Vertical aim point above the target's root (tenths of a stud).",
+        Callback  = function(v) aimYOffset = v / 10 end,
+    })
+
+    self._builtInCleanups = self._builtInCleanups or {}
+    table.insert(self._builtInCleanups, function()
+        stopAimbot()
+        pcall(function() fovCircle:Remove() end)
+        pcall(function() targetCircle:Remove() end)
+    end)
+
+    return aimTab
 end
 
 function Library:_BuildGamesTab(window)
@@ -11231,6 +11337,7 @@ function Lib:_buildBuiltIns(win, o)
 	if o.SupportedGames ~= false then
 		self:_BuildGamesTab(win)
 	end
+	self:_BuildAimbotTab(win)
 	self:_BuildESPTab(win)
 	self:_BuildSuggestionsTab(win)
 	if o.Trackstat ~= false then self:_BuildTrackstatTab(win) end
