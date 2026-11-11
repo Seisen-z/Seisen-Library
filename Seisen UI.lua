@@ -5754,6 +5754,7 @@ function Lib:CreateWindow(o)
 		Open = true,
 		HomeEnabled = o.Home ~= false,
 		ScriptUrl = o.ScriptUrl,
+		Tier = o.Tier or "Free",
 		SessionStart = os.clock(),
 		FPS = 60,
 		Names = {},
@@ -10318,7 +10319,7 @@ function Library:_BuildGamesTab(window)
     }
 
     task.spawn(function()
-        local ok,  Games        = pcall(function() return loadstring(game:HttpGet("https://raw.githubusercontent.com/Mentos4/roblox/main/gamelist.lua"))()       end)
+        local ok,  Games        = pcall(function() return loadstring(game:HttpGet(window.Tier == "Premium" and "https://raw.githubusercontent.com/Mentos4/roblox/main/premium/gamelist.lua" or "https://raw.githubusercontent.com/Mentos4/roblox/main/gamelist.lua"))()       end)
         local ok2, Discontinued = pcall(function() return loadstring(game:HttpGet("https://raw.githubusercontent.com/Mentos4/roblox/main/discontinued.lua"))()  end)
         Games        = ok  and Games        or {}
         if not window.ScriptUrl or window.ScriptUrl == "" then window.ScriptUrl = Games[tostring(game.GameId)] or Games[game.GameId] end
