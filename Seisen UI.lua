@@ -13,9 +13,9 @@ local LocalPlayer = Players.LocalPlayer
 
 local Lib = { Flags = {}, Windows = {} }
 -- Game functions can silently drop the calling thread's UI access while its identity still reads the same; reapplying the identity restores it
-function Lib._fixIdentity()
+function Lib._fixIdentity(identity)
 	if getthreadidentity and setthreadidentity then
-		local identity = getthreadidentity()
+		identity = identity or getthreadidentity()
 		pcall(setthreadidentity, 2)
 		pcall(setthreadidentity, identity)
 	end
@@ -1451,6 +1451,7 @@ function Container:Input(o)
 		Parent = chip,
 	})
 	local function resize()
+		Lib._fixIdentity(8)
 		local w = ChipWidth(row)
 		chip.Size = UDim2.fromOffset(w, CHIP + 2)
 		title.Size = UDim2.new(1, -(14 + w + 24), title.Size.Y.Scale, title.Size.Y.Offset)
@@ -1519,6 +1520,7 @@ function Container:Keybind(o)
 	local text = Label({ Size = UDim2.fromScale(1, 1), TextSize = 13, TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Center, TextTruncate = Enum.TextTruncate.None, Parent = chip })
 	local handle = { Value = o.Default, Listening = false }
 	local function resize()
+		Lib._fixIdentity(8)
 		local w = math.max(text.TextBounds.X + 20, 36)
 		Tween(chip, { Size = UDim2.fromOffset(w, CHIP) }, 0.2)
 		title.Size = UDim2.new(1, -(14 + w + 24), title.Size.Y.Scale, title.Size.Y.Offset)
@@ -1944,6 +1946,7 @@ function Container:Dropdown(o)
 	local chipButton = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 2, Parent = chip })
 
 	local function resize()
+		Lib._fixIdentity(8)
 		if stacked then
 			chip.Size = UDim2.new(1, -28, 0, chipHeight)
 			return
