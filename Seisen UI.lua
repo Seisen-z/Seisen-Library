@@ -547,8 +547,9 @@ local ControlAliases = {
 
 local function Safe(fn, ...)
 	if type(fn) == "function" then
+		local identity = getthreadidentity and getthreadidentity()
 		local ok, err = pcall(fn, ...)
-		Lib._fixIdentity()
+		Lib._fixIdentity(identity)
 		if not ok then
 			warn("[Seisen UI] callback error: " .. tostring(err))
 		end
@@ -3765,6 +3766,7 @@ function Window:_addPage(name, icon, scrolling, builtIn, activeIcon)
 end
 
 function Window:SelectPage(entry)
+	Lib._fixIdentity(8)
 	if self.Current == entry then
 		return
 	end
