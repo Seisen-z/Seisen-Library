@@ -5,6 +5,7 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local TextService = game:GetService("TextService")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local GuiService = game:GetService("GuiService")
@@ -925,6 +926,31 @@ local function ChipWidth(row)
 	return math.clamp(math.floor(row.AbsoluteSize.X * 0.48), 90, 220)
 end
 
+-- rendered height of text wrapped to a width
+local function TextHeight(text, size, font, width)
+	local ok, bounds = pcall(TextService.GetTextSize, TextService, tostring(text or ""), size, font, Vector2.new(math.max(width, 20), 10000))
+	return ok and bounds.Y or size
+end
+
+-- let a row grow to fit its (wrapped) title instead of cutting the title off
+local function GrowRow(row, label)
+	local base = row.Size.Y.Offset
+	local function fit()
+		local want = math.max(base, math.ceil(label.TextBounds.Y) + 18)
+		if row.Size.Y.Offset ~= want then
+			row.Size = UDim2.new(row.Size.X.Scale, row.Size.X.Offset, 0, want)
+		end
+	end
+	label:GetPropertyChangedSignal("TextBounds"):Connect(fit)
+	task.defer(fit)
+end
+
+-- rendered width of a single line of text (0 if it cannot be measured)
+local function TextWidth(text, size, font)
+	local ok, bounds = pcall(TextService.GetTextSize, TextService, tostring(text or ""), size, font, Vector2.new(10000, 100))
+	return ok and bounds.X or 0
+end
+
 local function Glow(parent, size, color, transparency)
 	return New("ImageLabel", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -993,7 +1019,7 @@ local function Register(self, opts, handle, entry, row)
 end
 
 -- title (+ optional description) on the left of a row
-local function Title(row, name, desc, rightPad)
+local function Title(row, name, desc, rightPad, ownRowHeight)
 	local width = UDim2.new(1, -(14 + (rightPad or 0)), 0, 16)
 	if desc and desc ~= "" then
 		local y = math.floor((ROW_DESC - 32) / 2)
@@ -1009,7 +1035,10 @@ local function Title(row, name, desc, rightPad)
 		})
 		return t, d
 	end
-	local t = Label({ Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -(14 + (rightPad or 0)), 1, 0), Text = name or "", TextSize = 13, Parent = row })
+	local t = Label({ Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -(14 + (rightPad or 0)), 1, 0), Text = name or "", TextSize = 13, TextWrapped = true, TextTruncate = Enum.TextTruncate.None, Parent = row })
+	if not ownRowHeight then
+		GrowRow(row, t)
+	end
 	return t
 end
 
@@ -1275,7 +1304,21 @@ function Container:Slider(o)
 	local fmt = "%." .. decimals .. "f"
 	local height = o.Desc and 66 or 50
 	local row, entry = self:_row(height, o.Name, "Slider")
-	Label({ Position = UDim2.fromOffset(14, 5), Size = UDim2.new(1, -120, 0, 18), Text = o.Name or "Slider", TextSize = 13, Parent = row })
+	local sliderTitle = Label({ Position = UDim2.fromOffset(14, 5), Size = UDim2.new(1, o.Desc and -120 or -84, 0, 18), Text = o.Name or "Slider", TextSize = 13, Parent = row })
+	if not o.Desc then
+		-- wrap a long name onto more lines and make the row taller instead of cutting it off
+		sliderTitle.TextWrapped = true
+		sliderTitle.TextTruncate = Enum.TextTruncate.None
+		sliderTitle.AutomaticSize = Enum.AutomaticSize.Y
+		local function fit()
+			local want = math.max(height, math.ceil(sliderTitle.TextBounds.Y) + 27)
+			if row.Size.Y.Offset ~= want then
+				row.Size = UDim2.new(row.Size.X.Scale, row.Size.X.Offset, 0, want)
+			end
+		end
+		sliderTitle:GetPropertyChangedSignal("TextBounds"):Connect(fit)
+		task.defer(fit)
+	end
 
 	if o.Desc then
 		Label({ Position = UDim2.fromOffset(14, 27), Size = UDim2.new(1, -28, 0, 15), Text = o.Desc, TextSize = 11, FontFace = Fonts.Regular, TextColor3 = Theme.Muted, Parent = row })
@@ -1306,8 +1349,7 @@ function Container:Slider(o)
 	})
 	local chipBtn = New("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 2, Parent = chip })
 
-	local trackY = height - 13
-	local track = New("Frame", { Position = UDim2.new(0, 14, 0, trackY), Size = UDim2.new(1, -28, 0, 6), BackgroundColor3 = Theme.Surface3, BorderSizePixel = 0, Parent = row })
+	local track = New("Frame", { Position = UDim2.new(0, 14, 1, -13), Size = UDim2.new(1, -28, 0, 6), BackgroundColor3 = Theme.Surface3, BorderSizePixel = 0, Parent = row })
 	Round(track, 3)
 	local fill = New("Frame", { Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = Theme.Accent, BorderSizePixel = 0, Parent = track })
 	Round(fill, 3)
@@ -1323,7 +1365,7 @@ function Container:Slider(o)
 	Round(knob, 3)
 	Stroke(knob, Theme.Accent, 1, 0.15)
 	local hit = New("TextButton", {
-		Position = UDim2.new(0, 8, 0, trackY - 13),
+		Position = UDim2.new(0, 8, 1, -26),
 		Size = UDim2.new(1, -16, 0, 28),
 		BackgroundTransparency = 1,
 		Text = "",
@@ -1935,7 +1977,10 @@ function Container:Dropdown(o)
 			Label({ Position = UDim2.fromOffset(14, 1), Size = UDim2.new(1, -28, 0, 16), Text = o.Name, TextSize = 13, Parent = row })
 		end
 	else
-		title = Title(row, o.Name, o.Desc, 180)
+		-- the closed dropdown keeps its fixed size; only the opened list grows to fit long options
+		title = Title(row, o.Name, o.Desc, 180, true)
+		title.TextWrapped = false
+		title.TextTruncate = Enum.TextTruncate.AtEnd
 	end
 	local chip, chipStroke = Chip(row, chipHeight)
 	if stacked then
@@ -2090,6 +2135,7 @@ function Container:Dropdown(o)
 	local query = ""
 	local items = {}
 	local popSize = Vector2.new(220, 120)
+	local widest -- widest option text, measured once per option list
 
 	local function matches(opt)
 		return query == "" or string.find(string.lower(tostring(opt)), query, 1, true) ~= nil
@@ -2159,7 +2205,14 @@ function Container:Dropdown(o)
 		list.Position = UDim2.fromOffset(0, y)
 		list.Size = UDim2.new(1, 0, 0, listHeight)
 		local s = winScale()
-		local width = math.max(chip.AbsoluteSize.X / s, o.PopupWidth or 210)
+		if not widest then
+			widest = 0
+			for _, opt in ipairs(options) do
+				widest = math.max(widest, TextWidth(opt, 13, Enum.Font.GothamMedium))
+			end
+		end
+		-- option label = popup - 16 padding - 6 gutter - 44/46 icon inset; +8 for the bold match highlight
+		local width = math.max(chip.AbsoluteSize.X / s, o.PopupWidth or 210, math.min(widest + (multi and 66 or 68) + 8, 440))
 		popSize = Vector2.new(math.min(width, (win.Gui.AbsoluteSize.X - 16) / s), y + listHeight + 16)
 		inner.Size = UDim2.new(1, 0, 0, popSize.Y)
 		if handle.Open then
@@ -2350,6 +2403,7 @@ function Container:Dropdown(o)
 	function handle:Refresh(newOptions, keep, silent)
 		Lib._fixIdentity()
 		options = newOptions or {}
+		widest = nil
 		if not keep then
 			selected = {}
 		end
