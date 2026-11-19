@@ -5793,6 +5793,7 @@ end
 Window.Unload = Window.Destroy
 
 function Lib:CreateWindow(o)
+	Lib:_activate()
 	o = Opts(o, { Name = "Title", LoadingSubtitle = "Subtitle", ToggleUIKeybind = "Keybind", ToggleKeybind = "Keybind" })
 	if type(o.Keybind) == "string" then
 		o.Keybind = Enum.KeyCode[o.Keybind]
@@ -6251,7 +6252,8 @@ local function NotifyHost()
 	if Lib._notifyHost and Lib._notifyHost.Gui.Parent then
 		return Lib._notifyHost
 	end
-	SweepOrphans()
+	-- a copy that was never activated (wrong game) must not sweep the notify host and widgets of the copy that is in use
+	if Lib._activated then SweepOrphans() end
 	local gui = New("ScreenGui", { Name = "SeisenNotify", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true, DisplayOrder = 1000010 })
 	ParentGui(gui)
 	local toasts = New("Frame", { Name = "Notifications", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -20, 1, -20), Size = UDim2.new(0, 280, 1, -40), BackgroundTransparency = 1, ZIndex = 50, Parent = gui })
@@ -6303,6 +6305,7 @@ function Lib:SetGameId(gameId)
 		Lib:Notify({ Title = "Unauthorized Game", Content = "This script won't work on this game.", Duration = 5 })
 		return false
 	end
+	Lib:_activate()
 	return true
 end
 
@@ -12346,21 +12349,25 @@ do
  FeatureKinds.PriorityList="list"
 end
 
--- running a script again loads a second copy of the library; unload the previous copy so only one window ever exists
-do
+-- running a script again loads a second copy of the library; once the new copy is actually used, unload the previous copy so only one window ever exists.
+-- Only a copy whose game check passed (SetGameId) or that opens a window gets here: a script run in the wrong game stops at its game check,
+-- so it never reaches this and cannot close the window the right script already has open
+function Lib:_activate()
+	if self._activated then return end
+	self._activated = true
 	local env = getgenv and getgenv() or shared
 	local previous = env.SeisenActiveLib
-	if previous and previous ~= Lib then
+	if previous and previous ~= self then
 		pcall(previous.Unload, previous)
 	elseif not previous and getgc then
 		-- copies loaded before this registry existed were never recorded, so find them
 		for _, t in ipairs(getgc(true)) do
-			if type(t) == "table" and t ~= Lib and rawget(t, "Windows") and rawget(t, "Toggles") and type(rawget(t, "Unload")) == "function" then
+			if type(t) == "table" and t ~= self and rawget(t, "Windows") and rawget(t, "Toggles") and type(rawget(t, "Unload")) == "function" then
 				pcall(t.Unload, t)
 			end
 		end
 	end
-	env.SeisenActiveLib = Lib
+	env.SeisenActiveLib = self
 end
 
 return Lib
