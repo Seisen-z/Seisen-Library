@@ -3062,6 +3062,53 @@ function Groupbox:_enablePopOut(header, titleLabel, enabled)
 		return center.X >= origin.X - margin and center.X <= origin.X + size.X + margin and center.Y >= origin.Y - margin and center.Y <= origin.Y + size.Y + margin
 	end
 	local function closePopup() if win._closePopup then win._closePopup() end end
+	function group:_slot() return placeholder and placeholder.Parent and placeholder or box end
+	-- true when the dragged header is over a place where the section can dock; hovering another section or an empty column moves the placeholder there
+	local function dropTarget()
+		if overDock() then return true end
+		local host = group.Host
+		if not (host and host._groups and host.Left ~= host.Right and placeholder and placeholder.Parent) then return false end
+		local center = header.AbsolutePosition + header.AbsoluteSize / 2
+		local page = group.Tab and group.Tab.Page
+		if not win.Open or (group.Tab and not group.Tab.Page.Visible) or (page and (center.Y < page.AbsolutePosition.Y or center.Y > page.AbsolutePosition.Y + page.AbsoluteSize.Y)) then return false end
+		local function inside(frame) local o, s = frame.AbsolutePosition, frame.AbsoluteSize return center.X >= o.X and center.X <= o.X + s.X and center.Y >= o.Y and center.Y <= o.Y + s.Y end
+		local function place(column, index, siblings)
+			local list = {}
+			for _, sibling in ipairs(siblings) do if sibling ~= placeholder then table.insert(list, sibling) end end
+			table.insert(list, math.clamp(index, 1, #list + 1), placeholder)
+			placeholder.Parent = column
+			for order, frame in ipairs(list) do frame.LayoutOrder = order end
+		end
+		local function siblingsOf(column)
+			local list = {}
+			for _, child in ipairs(column:GetChildren()) do if child:IsA("GuiObject") then table.insert(list, child) end end
+			table.sort(list, function(a, b) return a.LayoutOrder < b.LayoutOrder end)
+			return list
+		end
+		for _, other in ipairs(host._groups) do
+			local slot = other ~= group and not other._destroyed and other:_slot()
+			if slot and slot.Visible and (slot.Parent == host.Left or slot.Parent == host.Right) and inside(slot) then
+				local siblings = siblingsOf(slot.Parent)
+				local target = table.find(siblings, slot)
+				local after = center.Y > slot.AbsolutePosition.Y + slot.AbsoluteSize.Y / 2
+				local mine = table.find(siblings, placeholder)
+				local want = target + (after and 1 or 0)
+				if mine and mine < target then want -= 1 end
+				if slot.Parent ~= placeholder.Parent or mine ~= want then place(slot.Parent, want, siblings) end
+				return true
+			end
+		end
+		for _, column in ipairs({ host.Left, host.Right }) do
+			local o, s = column.AbsolutePosition, column.AbsoluteSize
+			local last = siblingsOf(column)
+			if center.X >= o.X and center.X <= o.X + s.X and center.Y > o.Y + s.Y then
+				if column ~= placeholder.Parent or last[#last] ~= placeholder then place(column, #last + 1, last) end
+				return true
+			end
+		end
+		return false
+	end
+	group._dropTarget = dropTarget
 	function group:PopOut()
 		if self._popped or self._destroyed or not box.Parent then return end
 		if settle then settle() end
@@ -3132,14 +3179,14 @@ function Groupbox:_enablePopOut(header, titleLabel, enabled)
 			if dragged then
 				local target = clamp(startPosition + delta / scale(), Vector2.new(panel.Size.X.Offset, panel.Size.Y.Offset))
 				panel.Position = UDim2.fromOffset(target.X, target.Y)
-				dockStroke.Color = overDock() and Theme.Accent or Theme.Stroke
+				dockStroke.Color = dropTarget() and Theme.Accent or Theme.Stroke
 			end
 		end
 	end
 	function group:_popRelease()
 		startMouse = nil
 		if dragged and panel then
-			if overDock() then self:Dock() return end
+			if dropTarget() then self:Dock() return end
 			dockStroke.Color = Theme.Stroke
 			Tween(motionScale, { Scale = 1 }, 0.4, Enum.EasingStyle.Back)
 			Tween(shadow, { ImageTransparency = 0.35 }, 0.3)
@@ -3208,7 +3255,15 @@ function Tab:Groupbox(o, icon)
 	Pad(body, 0, 6, 0, 8)
 	List(body, 2)
 
-	local group = setmetatable({ Body = body, Items = {}, Window = self.Window, Frame = box, Name = o.Name or "Groupbox", Tab = self._entry }, Groupbox)
+	local group = setmetatable({ Body = body, Items = {}, Window = self.Window, Frame = box, Name = o.Name or "Groupbox", Tab = self._entry, Host = self, _baseOrder = box.LayoutOrder }, Groupbox)
+	if self._groups then
+		local key, count = group.Name, 1
+		while self._groupByName[key] do count += 1 key = group.Name .. "#" .. count end
+		group._key = key
+		self._groupByName[key] = group
+		table.insert(self._groups, group)
+		self:_applyLayoutSoon()
+	end
 	if self._entry then
 		table.insert(self.Window.Groups, { Name = group.Name, Tab = self._entry, Obj = group, Frame = box })
 	end
@@ -4204,11 +4259,68 @@ function Window:Tab(o, icon, builtIn)
 		List(f, 10)
 		return f
 	end
-	local tab = setmetatable({ Window = self, Left = column(0), Right = column(0.5), Counts = { 0, 0 }, _entry = entry, _stack = stack }, Tab)
+	local tab = setmetatable({ Window = self, Left = column(0), Right = column(0.5), Counts = { 0, 0 }, _entry = entry, _stack = stack, _groups = {}, _groupByName = {} }, Tab)
+	tab:_registerLayout(o.Name or "Tab")
 	if not self.Current and not self.HomeEnabled then
 		self:SelectPage(entry)
 	end
 	return tab
+end
+
+-- Section order: popped-out sections can be dropped in a new place, and the order is saved with the config as the flag "Layout_<tab>"
+function Tab:_registerLayout(name)
+	if self.Left == self.Right then return end
+	local flag, win, tab = "Layout_" .. tostring(name), self.Window, self
+	local scheduled
+	local function columnOf(slot)
+		return slot.Parent == tab.Left and "Left" or slot.Parent == tab.Right and "Right" or nil
+	end
+	local handle = { Frame = self._stack }
+	function handle:Get()
+		local layout = { Left = {}, Right = {} }
+		for _, side in ipairs({ "Left", "Right" }) do
+			local slots = {}
+			for _, group in ipairs(tab._groups) do
+				local slot = group:_slot()
+				if not group._destroyed and columnOf(slot) == side then table.insert(slots, { Name = group._key, Order = slot.LayoutOrder }) end
+			end
+			table.sort(slots, function(a, b) return a.Order < b.Order end)
+			for _, slot in ipairs(slots) do table.insert(layout[side], slot.Name) end
+		end
+		return layout
+	end
+	local function apply(layout)
+		local mentioned = {}
+		for _, side in ipairs({ "Left", "Right" }) do
+			for index, key in ipairs(type(layout[side]) == "table" and layout[side] or {}) do
+				local group = tab._groupByName[key]
+				if group and not group._destroyed and not mentioned[group] then
+					mentioned[group] = true
+					local slot = group:_slot()
+					slot.Parent, slot.LayoutOrder = tab[side], index
+				end
+			end
+		end
+		for _, group in ipairs(tab._groups) do
+			if not mentioned[group] and not group._destroyed and columnOf(group:_slot()) then group:_slot().LayoutOrder = 1000 + group._baseOrder end
+		end
+	end
+	function handle:Set(layout)
+		if type(layout) ~= "table" then return end
+		tab._wantedLayout = layout
+		tab:_applyLayoutSoon()
+	end
+	-- sections are created one after another, so the saved order is applied again shortly after the last one appears
+	self._applyLayoutSoon = function()
+		if scheduled or not tab._wantedLayout then return end
+		scheduled = true
+		task.delay(0.2, function()
+			scheduled = false
+			if tab._wantedLayout then apply(tab._wantedLayout) end
+		end)
+	end
+	Lib.Flags[flag] = handle
+	win:_flagCreated(flag, handle)
 end
 
 function Window:Notify(o)
