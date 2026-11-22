@@ -5760,7 +5760,7 @@ end
 
 -- highlight a control (used by the feature list)
 function Window:_flash(target, radius)
-	for _, name in ipairs({ "SearchFlash", "SearchGlow" }) do
+	for _, name in ipairs({ "SearchFlash", "SearchGlow", "SearchFlashHost" }) do
 		local old = target:FindFirstChild(name)
 		if old then
 			old:Destroy()
@@ -5769,10 +5769,16 @@ function Window:_flash(target, radius)
 	radius = radius or 8
 	local accent = Theme.Accent
 	local bright = accent:Lerp(Color3.new(1, 1, 1), 0.65)
-	local glow = New("Frame", { Name = "SearchGlow", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 10, Parent = target })
+	-- a target with a list layout (a groupbox) would stack the highlight frames inside it and stretch it, so they go in a zero-height host at the end of the list
+	local host, size = target, UDim2.fromScale(1, 1)
+	if target:FindFirstChildOfClass("UIListLayout") or target:FindFirstChildOfClass("UIGridLayout") then
+		host = New("Frame", { Name = "SearchFlashHost", Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, LayoutOrder = 2147483647, Parent = target })
+		size = UDim2.new(1, 0, 0, target.AbsoluteSize.Y / math.max(self.RootScale.Scale, 0.05))
+	end
+	local glow = New("Frame", { Name = "SearchGlow", AnchorPoint = host ~= target and Vector2.new(0, 1) or Vector2.zero, Size = size, BackgroundTransparency = 1, ZIndex = 10, Parent = host })
 	Round(glow, radius)
 	local glowStroke = New("UIStroke", { Color = accent, Thickness = 1, Transparency = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = glow })
-	local flash = New("Frame", { Name = "SearchFlash", Size = UDim2.fromScale(1, 1), BackgroundColor3 = accent, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 10, Parent = target })
+	local flash = New("Frame", { Name = "SearchFlash", AnchorPoint = host ~= target and Vector2.new(0, 1) or Vector2.zero, Size = size, BackgroundColor3 = accent, BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 10, Parent = host })
 	Round(flash, radius)
 	local sheen = New("UIGradient", {
 		Transparency = NumberSequence.new({
@@ -5797,7 +5803,7 @@ function Window:_flash(target, radius)
 		ring.BorderStrokePosition = Enum.BorderStrokePosition.Inner
 	end)
 	local thick = inner and 6 or 3
-	if not inner then
+	if not inner and host == target then
 		glow.Position = UDim2.fromOffset(thick + 1, thick + 1)
 		glow.Size = UDim2.new(1, -(thick + 1) * 2, 1, -(thick + 1) * 2)
 		flash.Position = UDim2.fromOffset(2, 2)
@@ -5827,6 +5833,9 @@ function Window:_flash(target, radius)
 		task.wait(0.7)
 		flash:Destroy()
 		glow:Destroy()
+		if host ~= target then
+			host:Destroy()
+		end
 		if scale then
 			scale:Destroy()
 		end
