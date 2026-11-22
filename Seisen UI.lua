@@ -5223,7 +5223,7 @@ function Window:_buildHome(o)
 			{ "Discord", "message-circle", Color3.fromRGB(88, 101, 242), o.Discord or "https://discord.gg/CQ2tFjkn4C", 128 },
 			{ "TikTok", "music-2", Color3.fromRGB(33, 175, 181), "https://www.tiktok.com/@seisen.hub", 256 },
 			{ "Website", "globe", Color3.fromRGB(52, 137, 217), o.Website or "https://seisen.vercel.app" },
-			{ "Premium", "crown", Color3.fromRGB(177, 124, 37), "https://seisen.vercel.app/premium" },
+			{ "Premium", "crown", Color3.fromRGB(177, 124, 37), "https://www.seisen.store/premium" },
 		}) do
 			local btn = New("TextButton", { Name = social[1], Size = UDim2.fromOffset(40, 40), BackgroundColor3 = Theme.Surface, BorderSizePixel = 0, Text = "", AutoButtonColor = false, LayoutOrder = i, Parent = socialRow })
 			local face
@@ -11438,7 +11438,7 @@ do
 		end })
 		connection:AddParagraph({ Title = "Website", Content = "Keep your key private. Reset permanently deletes this connection inventory, gains and history and removes it from website accounts." })
 		connection:AddButton({ Name = "Copy Website", Callback = function()
-			win:CopyToClipboard("https://seisen.vercel.app/trackstat", "Website link copied")
+			win:CopyToClipboard("https://www.seisen.store/trackstat", "Website link copied")
 		end })
 		local function addGame(section, gameId, about)
 			local summary = section:AddLabel({ Text = game.GameId == gameId and "Tracks automatically in this game. Existing inventory is not counted as session gains." or "Not playing this game." })
