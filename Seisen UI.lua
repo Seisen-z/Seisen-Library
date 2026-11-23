@@ -4392,12 +4392,23 @@ function Window:Notify(o)
 			TextYAlignment = Enum.TextYAlignment.Top,
 			Parent = content,
 		})
+		-- TextBounds only counts the lines that fit the label's current height, so measure the wrapped text itself (in unscaled units)
 		local function fit()
-			local textHeight = math.max(body.TextBounds.Y, 16)
-			body.Size = UDim2.new(1, -offset, 0, textHeight)
-			card.Size = UDim2.new(1, 0, 0, 61 + textHeight)
+			local ui = self.Toasts:FindFirstChildOfClass("UIScale")
+			local width = body.AbsoluteSize.X / math.max(ui and ui.Scale or 1, 0.05)
+			if width < 20 then
+				width = self.Toasts.Size.X.Offset - 30 - offset
+			end
+			local params = Instance.new("GetTextBoundsParams")
+			params.Text, params.Font, params.Size, params.Width = o.Content, body.FontFace, body.TextSize, width
+			local ok, bounds = pcall(TextService.GetTextBoundsAsync, TextService, params)
+			local textHeight = math.max(ok and math.ceil(bounds.Y) or body.TextBounds.Y, 16)
+			if card.Size.Y.Offset ~= 61 + textHeight then
+				body.Size = UDim2.new(1, -offset, 0, textHeight)
+				card.Size = UDim2.new(1, 0, 0, 61 + textHeight)
+			end
 		end
-		body:GetPropertyChangedSignal("TextBounds"):Connect(fit)
+		body:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
 		fit()
 	end
 	local barTrack = New("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 16, 1, -8), Size = UDim2.new(1, -32, 0, 3), BackgroundColor3 = Theme.Surface3, BorderSizePixel = 0, Parent = card })
@@ -10802,7 +10813,7 @@ do
 	local function newKey()
 		return "sp_" .. (HttpService:GenerateGUID(false) .. HttpService:GenerateGUID(false)):gsub("%-", ""):lower()
 	end
-	local PET_SIMULATOR_99, TAP_SIMULATOR, ANIME_DICE, BLOX_FRUITS = 3317771874, 10629695169, 10708913337, 994732206
+	local PET_SIMULATOR_99, BLOX_FRUITS = 3317771874, 994732206
 	local function modelIcon(key)
 		local a, b = 5381, 0
 		for i = 1, #key do a = (a * 33 + key:byte(i)) % 4294967296; b = (b * 31 + key:byte(i)) % 1000000000 end
@@ -10810,8 +10821,6 @@ do
 	end
 	local function counts(gameId)
 		if gameId == BLOX_FRUITS then return { fruits = 0, weapons = 0, accessories = 0, materials = 0, items = 0 } end
-		if gameId == ANIME_DICE then return { units = 0, boosts = 0, gear = 0, items = 0 } end
-		if gameId == TAP_SIMULATOR then return { secret1 = 0, secret2 = 0, secret3 = 0, secretx = 0, items = 0, potions = 0 } end
 		return { items = 0, huge = 0, titanic = 0, gargantuan = 0 }
 	end
 
@@ -10874,42 +10883,6 @@ do
 		return details
 	end
 
-	function Lib:_TrackstatReadTapSimulator()
-		local s = self._trackstat
-		if setthreadidentity then pcall(setthreadidentity, 2) end
-		local replica = s.data:GetReplica()
-		assert(replica and replica.Data, "Inventory is not ready; retrying shortly")
-		local data, current, owned, catalog, stacks = replica.Data, {}, counts(TAP_SIMULATOR), {}, {}
-		local function add(key, kind, metric, amount, name, icon, rarity, description)
-			catalog[key] = { key = key, kind = kind, name = name:sub(1, 100), icon = icon, rarity = rarity, description = tostring(description or ""):sub(1, 300) }
-			current[key] = current[key] or { name = catalog[key].name, kind = kind == "pet" and metric or kind, metric = metric, owned = 0 }
-			current[key].owned += amount
-			owned[metric] += amount
-		end
-		for _, pet in pairs(data.Pets.Owned) do
-			local tier = pet.Tier or "Normal"
-			local metric = pet.Rarity == "Secret I" and "secret1" or pet.Rarity == "Secret II" and "secret2" or pet.Rarity == "Secret III" and "secret3" or pet.Rarity == "Secret X" and "secretx" or nil
-			local key = "pet:" .. pet.Name .. ":" .. tier
-			local name = (tier == "Normal" and "" or tier == "Shiny" and "Rainbow " or tier .. " ") .. pet.Name
-			if metric then add(key, "pet", metric, 1, name, modelIcon(key), pet.Rarity) end
-		end
-		for id, amount in pairs(data.Items.Owned) do
-			if amount > 0 then
-				local item = s.items.Get(id)
-				local potion = item and item.data and item.data.Type == "Boost"
-				local kind = potion and "potion" or "item"
-				add(kind .. ":" .. id, kind, potion and "potions" or "items", amount, item and item.Name or id, tostring(item and item.Image or ""):match("%d+") or "", item and item.Rarity, item and item.Description)
-			end
-		end
-		for key, item in pairs(current) do table.insert(stacks, { k = key, a = item.owned }) end
-		table.sort(stacks, function(a, b) return a.a == b.a and a.k < b.k or a.a > b.a end)
-		while #stacks > 1000 do table.remove(stacks) end
-		local details = self:_TrackstatDelta(s, current)
-		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details, inventory = stacks, coins = data.Currencies.Coins, gems = data.Currencies.Gems, candy_corn = data.Currencies.CandyCorn or 0, rebirths = data.Statistics.Rebirths }
-		self:_TrackstatQueueCatalog(s, catalog)
-		s.summaryText = string.format("Coins: %s · Gems: %s · Candy Corn: %s · Rebirths: %s\nPets: %s Secret 1 · %s Secret 2 · %s Secret 3 · %s Secret X\nItems: %s · Potions: %s", FormatCount(s.snapshot.coins), FormatCount(s.snapshot.gems), FormatCount(s.snapshot.candy_corn), FormatCount(s.snapshot.rebirths), FormatCount(owned.secret1), FormatCount(owned.secret2), FormatCount(owned.secret3), FormatCount(owned.secretx), FormatCount(owned.items), FormatCount(owned.potions))
-	end
-
 	function Lib:_TrackstatReadBloxFruits()
 		local s = self._trackstat
 		if setthreadidentity then pcall(setthreadidentity, 2) end
@@ -10956,48 +10929,6 @@ do
 		s.summaryText = string.format("Money: %s · Fragments: %s · Level: %s\nInventory: %s fruits · %s weapons · %s accessories · %s materials · %s other items", FormatCount(s.snapshot.money), FormatCount(s.snapshot.fragments), FormatCount(s.snapshot.level), FormatCount(owned.fruits), FormatCount(owned.weapons), FormatCount(owned.accessories), FormatCount(owned.materials), FormatCount(owned.items))
 	end
 
-	function Lib:_TrackstatReadAnimeDice()
-		local s = self._trackstat
-		if setthreadidentity then pcall(setthreadidentity, 2) end
-		local inventory = s.data.Inventory()
-		assert(type(inventory) == "table", "Inventory is not ready; retrying shortly")
-		local current, owned, catalog, stacks, placed = {}, counts(ANIME_DICE), {}, {}, {}
-		for _, slot in pairs(s.data.Slots()) do if slot.unitId then placed[slot.unitId] = true end end
-		local income = 0
-		local function buffList(buffs)
-			local list = {}
-			for name, b in pairs(buffs or {}) do
-				local v = tonumber(b.amount) or 0
-				table.insert(list, { (name:gsub(" Multiplier$", "")), b.bucket == "percentage" and string.format("+%g%%", v * 100) or string.format("x%g", v) })
-			end
-			table.sort(list, function(x, y) return x[1] < y[1] end)
-			return #list > 0 and list or nil
-		end
-		for uid, entry in pairs(inventory) do
-			local config = s.registry.getEntryConfig(entry.name)
-			if config then
-				local kind, amount = config.kind, tonumber(entry.amount) or 1
-				local metric = kind == "Unit" and "units" or kind == "Boost" and "boosts" or kind == "Gear" and "gear" or "items"
-				local key, attrs = kind .. ":" .. entry.name, entry.attributes or {}
-				local rarity = config.getRarity and config.getRarity(attrs) or config.rarity
-				catalog[key] = { key = key, kind = kind:lower(), name = entry.name:sub(1, 100), icon = tostring(config.image or ""):match("%d+") or "", rarity = rarity, rarity_color = config.gradient and "#" .. config.gradient.Keypoints[1].Value:ToHex() or nil, description = tostring(config.description or ""):sub(1, 300) }
-				if catalog[key].icon == "" and (kind == "Unit" and config.model or kind == "Gear" and game.ReplicatedStorage.Assets.Gears:FindFirstChild(entry.name)) then catalog[key].icon = modelIcon(key) end
-				current[key] = current[key] or { name = entry.name, kind = kind:lower(), metric = metric, owned = 0 }
-				current[key].owned += amount
-				owned[metric] += amount
-				local perSecond = kind == "Unit" and config.income(attrs) or nil
-				if placed[uid] then income += perSecond or 0 end
-				table.insert(stacks, { k = key, a = amount, l = attrs.level, m = attrs.mutation and { attrs.mutation } or nil, gr = attrs.grade, tr = attrs.trait, lk = attrs.locked or nil, p = perSecond, c = kind == "Unit" and type(config.chance) == "function" and config.chance(attrs) or nil, pl = placed[uid] and 1 or nil, bf = buffList(config.buffs), d = config.duration, sl = config.slot, lm = config.luckMultiplier })
-			end
-		end
-		table.sort(stacks, function(a, b) return (a.c or 0) > (b.c or 0) end)
-		while #stacks > 1000 do table.remove(stacks) end
-		local details = self:_TrackstatDelta(s, current)
-		s.snapshot = { owned = owned, gained = table.clone(s.gained), details = details, inventory = stacks, money = s.data.Money(), rolls = s.data.Rolls(), rebirths = s.data.Rebirth(), per_second = income }
-		self:_TrackstatQueueCatalog(s, catalog)
-		s.summaryText = string.format("Money: %s · Rolls: %s · Rebirths: %s\nOwned: %s units · %s boosts · %s gear · %s items\nSession gains: %s units · %s boosts · %s gear · %s items", FormatCount(s.snapshot.money), FormatCount(s.snapshot.rolls), FormatCount(s.snapshot.rebirths), FormatCount(owned.units), FormatCount(owned.boosts), FormatCount(owned.gear), FormatCount(owned.items), FormatCount(s.gained.units), FormatCount(s.gained.boosts), FormatCount(s.gained.gear), FormatCount(s.gained.items))
-	end
-
 	-- Requiring a game module before the game has loaded it can leave it broken for the game too ("Requested module experienced
 	-- an error while loading"), which is what happened right after a server hop. Wait until the game has loaded it itself.
 	local trackstatStart = os.clock()
@@ -11017,8 +10948,6 @@ do
 		if not s.session then
 			local rs = game.ReplicatedStorage
 			local needed = s.gameId == BLOX_FRUITS and { rs:FindFirstChild("ItemReplicationService") }
-				or s.gameId == ANIME_DICE and { rs:FindFirstChild("Framework") and rs.Framework.Features.Data.DataController }
-				or s.gameId == TAP_SIMULATOR and { rs:FindFirstChild("Controllers") and rs.Controllers.Core.DataController }
 				or { rs:FindFirstChild("Library") and rs.Library.Universal.Inventory }
 			assert(gameLoaded(table.unpack(needed)), "Game is still loading; retrying shortly")
 			if setthreadidentity then pcall(setthreadidentity, 2) end
@@ -11026,15 +10955,6 @@ do
 				s.data = require(rs.ItemReplicationService)
 				s.items = require(rs.ItemConfig)
 				assert(s.data.IsInitialized, "Inventory is not ready; retrying shortly")
-			elseif s.gameId == ANIME_DICE then
-				s.data = require(rs.Framework.Features.Data.DataController)
-				require(rs.Framework.Features.Inventory.EntryTypes)
-				s.registry = require(rs.Framework.Features.Inventory.EntryRegistry)
-				assert(type(s.data.Inventory()) == "table", "Inventory is not ready; retrying shortly")
-			elseif s.gameId == TAP_SIMULATOR then
-				s.data = require(rs.Controllers.Core.DataController)
-				s.items = require(rs.Shared.Items.ItemCatalog)
-				assert(s.data:GetReplica(), "Inventory is not ready; retrying shortly")
 			else
 				s.inventory = require(rs.Library.Universal.Inventory)
 			end
@@ -11042,8 +10962,6 @@ do
 			s.session, s.sequence, s.uploadAt = HttpService:GenerateGUID(false), 0, 0
 		end
 		if s.gameId == BLOX_FRUITS then return self:_TrackstatReadBloxFruits() end
-		if s.gameId == ANIME_DICE then return self:_TrackstatReadAnimeDice() end
-		if s.gameId == TAP_SIMULATOR then return self:_TrackstatReadTapSimulator() end
 		local current, owned = {}, counts()
 		for _, item in pairs(s.inventory.Container(LocalPlayer):All()) do
 			local kind = item.Class.Name
@@ -11131,7 +11049,7 @@ do
 	local imagesUrl = "https://xsygxfeutjcwmqejslbv.supabase.co/storage/v1/object/"
 	function Lib:_TrackstatImages(s, catalog)
 		local req, budget, assets, identity = httpRequest(), 6, game:GetService("AssetService"), getthreadidentity and getthreadidentity()
-		local folder = s.gameId == BLOX_FRUITS and "bloxfruits" or s.gameId == ANIME_DICE and "animedice" or s.gameId == TAP_SIMULATOR and "tapsimulator" or "petsimulator99"
+		local folder = s.gameId == BLOX_FRUITS and "bloxfruits" or "petsimulator99"
 		local icons = {}
 		for _, item in pairs(catalog) do if item.icon ~= "" and not s.imaged[item.icon] then table.insert(icons, item.icon) end end
 		if #icons == 0 or s.closed then return end
@@ -11146,7 +11064,7 @@ do
 				budget -= 1
 				s.imaged[icon] = true
 				local finished, started = false, os.clock()
-				local source, target, viewport, screen, petImage, petRenderer
+				local source, target
 				local worker = task.spawn(function()
 					local success = false
 					pcall(function()
@@ -11157,72 +11075,6 @@ do
 							crop:WritePixelsBuffer(Vector2.zero, crop.Size, source:ReadPixelsBuffer(Vector2.new(sprite.x, sprite.y), crop.Size))
 							source:Destroy()
 							source = crop
-						elseif s.gameId == TAP_SIMULATOR and icon:sub(1, 1) == "0" then
-							if setthreadidentity then pcall(setthreadidentity, 2) end
-							petRenderer = require(game.ReplicatedStorage.Modules.Client.Pets.PetIconViewport)
-							local name, tier = item.key:match("^pet:(.*):([^:]+)$")
-							screen = Instance.new("ScreenGui")
-							screen.Name, screen.ResetOnSpawn = "SeisenTrackstatThumbnail", false
-							screen.Parent = LocalPlayer:WaitForChild("PlayerGui", 5)
-							petImage = Instance.new("ImageLabel")
-							petImage.Size, petImage.BackgroundTransparency, petImage.Parent = UDim2.fromOffset(96, 96), 1, screen
-							petRenderer.Attach(petImage, { Name = name, Tier = tier }, { Still = true, Entrance = false })
-							local started = os.clock()
-							repeat viewport = petImage:FindFirstChild("PetViewport"); task.wait(0.1) until viewport or s.closed or os.clock() - started >= 4
-							assert(viewport, "Pet picture is not ready")
-							task.wait(2)
-							if setthreadidentity then pcall(setthreadidentity, 8) end
-							source = assets:CreateEditableImageAsync(Content.fromUri(viewport:CaptureSnapshotAsync()))
-						elseif s.gameId == ANIME_DICE and icon:sub(1, 1) == "0" then
-							local config = s.registry.getEntryConfig(item.name)
-							local model
-							if config.kind == "Unit" then model = config.model() end
-							if setthreadidentity then pcall(setthreadidentity, 8) end
-							viewport = Instance.new("ViewportFrame")
-							viewport.Size, viewport.BackgroundTransparency, viewport.ImageTransparency = UDim2.fromOffset(96, 96), 1, 1
-							screen = Instance.new("ScreenGui")
-							screen.Name, screen.DisplayOrder, screen.IgnoreGuiInset, screen.ResetOnSpawn = "SeisenTrackstatThumbnail", -2147483648, true, false
-							screen.Parent, viewport.Parent = LocalPlayer:WaitForChild("PlayerGui", 5), screen
-							if config.kind == "Gear" then
-								model = Instance.new("Model")
-								model.Parent = viewport
-								local gear = game.ReplicatedStorage.Assets.Gears:FindFirstChild(item.name):Clone()
-								for _, child in ipairs(gear:GetChildren()) do
-									if child:IsA("BasePart") then
-										child.Anchored, child.Parent, model.PrimaryPart = true, model, child
-										child:RemoveTag("IgnoreViewportBounds")
-										local attachment = child:FindFirstChildOfClass("Attachment")
-										if attachment then child.PivotOffset = attachment.CFrame end
-									end
-								end
-								gear:Destroy()
-							end
-							model:ScaleTo(1)
-							model:PivotTo(CFrame.Angles(0, config.kind == "Gear" and math.rad((config.slot == "Back" and 0 or 180) + 25) or math.pi, 0))
-							model.Parent = viewport
-							-- Frame only what can be seen: invisible helper parts (floors, volumes) would shrink the character
-							local low, high
-							for _, part in ipairs(model:GetDescendants()) do
-								if part:IsA("BasePart") and part.Transparency < 0.95 then
-									for x = -1, 1, 2 do for y = -1, 1, 2 do for z = -1, 1, 2 do
-										local point = part.CFrame:PointToWorldSpace(Vector3.new(x * part.Size.X / 2, y * part.Size.Y / 2, z * part.Size.Z / 2))
-										low = low and low:Min(point) or point
-										high = high and high:Max(point) or point
-									end end end
-								end
-							end
-							assert(low, "Model has nothing visible")
-							local size, center = high - low, (low + high) / 2
-							local camera = Instance.new("Camera")
-							camera.FieldOfView = 30
-							camera.CFrame = CFrame.new(center + Vector3.new(0, 0, math.max(size.X, size.Y) / (2 * math.tan(math.rad(15))) * 1.08 + size.Z / 2), center)
-							camera.Parent, viewport.CurrentCamera = viewport, camera
-							-- Clothes and textures must be loaded first, or the snapshot shows a grey body
-							local preloaded, preloadStart = false, os.clock()
-							task.spawn(function() pcall(game:GetService("ContentProvider").PreloadAsync, game:GetService("ContentProvider"), { model }); preloaded = true end)
-							while not preloaded and os.clock() - preloadStart < 4 do task.wait(0.05) end
-							task.wait(0.2)
-							source = assets:CreateEditableImageAsync(Content.fromUri(viewport:CaptureSnapshotAsync()))
 						else
 							source = assets:CreateEditableImageAsync(Content.fromUri("rbxassetid://" .. icon))
 						end
@@ -11244,9 +11096,6 @@ do
 				if not finished then task.cancel(worker); s.imaged[icon] = nil end
 				if source then source:Destroy() end
 				if target then target:Destroy() end
-				if petImage and petRenderer then pcall(petRenderer.Detach, petImage) end
-				if viewport then viewport:Destroy() end
-				if screen then screen:Destroy() end
 			end
 		end
 		if identity and setthreadidentity then pcall(setthreadidentity, identity) end
@@ -11264,7 +11113,7 @@ do
 		local keys = {}
 		for key in pairs(catalog) do if not s.known[key] then table.insert(keys, key) end end
 		if #keys > 0 then
-			local prefix = s.gameId == BLOX_FRUITS and "trackstats_bloxfruits_catalog_" or s.gameId == ANIME_DICE and "trackstats_animedice_catalog_" or s.gameId == TAP_SIMULATOR and "trackstats_tapsimulator_catalog_" or "trackstat_catalog_"
+			local prefix = s.gameId == BLOX_FRUITS and "trackstats_bloxfruits_catalog_" or "trackstat_catalog_"
 			local ok, missing = self:_TrackstatRPC(prefix .. "missing", { p_keys = keys })
 			if not ok then error(missing, 0) end
 			if s.closed then return end
@@ -11404,7 +11253,7 @@ do
 		if type(saved.key) ~= "string" or not saved.key:match("^sp_%x+$") or #saved.key ~= 67 then saved.key = newKey() end
 		local s = self._trackstat
 		if not s or s.closed then
-			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == TAP_SIMULATOR or game.GameId == ANIME_DICE or game.GameId == BLOX_FRUITS, busy = false, nextAt = 0, known = {}, imaged = {} }
+			s = { key = saved.key, pending = saved.pending, path = path, gameId = game.GameId, enabled = game.GameId == PET_SIMULATOR_99 or game.GameId == BLOX_FRUITS, busy = false, nextAt = 0, known = {}, imaged = {} }
 			self._trackstat = s
 		end
 		connection:AddLabel({ Text = LocalPlayer.Name .. " · " .. tostring(LocalPlayer.UserId) })
@@ -11447,8 +11296,6 @@ do
 			section:SetCollapsed(true)
 		end
 		addGame(stats, PET_SIMULATOR_99, "Items and Huge, Titanic, Gargantuan pets. Currency and regular pets are excluded. Inventory checks run every 5 seconds and sync every 30 seconds. Gains include trades and rewards, not only hatches. The website shows private history and anonymous community totals.")
-		addGame(tab:AddRightSection("Tap Simulator", "mouse-pointer-click"), TAP_SIMULATOR, "Secret 1, Secret 2, Secret 3 and Secret X pets, items, potions, coins, gems, Candy Corn and rebirths. Existing inventory is not a gain; trades and rewards count as inventory increases.")
-		addGame(tab:AddRightSection("Anime Dice", "dices"), ANIME_DICE, "Units with levels, mutations, grades and traits, boosts, gear and items including tokens. Money, placed-unit income, rolls and rebirths. Checks run every 5 seconds and sync every 30 seconds. Existing inventory is not a gain; trades and rewards count as inventory increases.")
 		addGame(tab:AddRightSection("Blox Fruits", "swords"), BLOX_FRUITS, "Complete replicated inventory: stored and permanent fruits, weapons, accessories, materials, styles, skins, titles and other owned items. Includes individual item details, mastery, upgrades, money, fragments, level and bounty. Existing inventory is not counted as gains.")
 	end
 end
